@@ -6,7 +6,6 @@ from core.utils import parse_percentual_br
 from padronizacao.servico_padronizacao import ServicoPadronizacao
 from padronizacao.parser_portabilidade import montar_complemento
 
-
 servico_padronizacao = ServicoPadronizacao()
 
 
@@ -17,10 +16,12 @@ def mapear_banco_para_itens(linhas: List[Dict[str, Any]]) -> List[CanonicalItem]
         id_raw = str(row.get("Id do Produto na Origem", "")).strip()
         taxa_raw = str(row.get("Taxa a.m", "")).strip()
 
+        # Prazo único ou faixa (ex.: 120 ou 96-120)
         prazo_ini = str(row.get("Prazo Inicial", "")).strip()
         prazo_fim = str(row.get("Prazo Final", "")).strip()
         prazo_raw = prazo_ini if prazo_ini == prazo_fim else f"{prazo_ini}-{prazo_fim}"
 
+        # Entrada enviada para IA
         entrada_ia = {
             "id_raw": id_raw,
             "taxa_raw": taxa_raw,
@@ -29,6 +30,7 @@ def mapear_banco_para_itens(linhas: List[Dict[str, Any]]) -> List[CanonicalItem]
             "convenio_raw": row.get("Convênio", ""),
         }
 
+        # Execução IA
         padrao, confianca = servico_padronizacao.padronizar(entrada_ia)
 
         produto_nome = padrao.get("produto_padronizado") or entrada_ia["produto_raw"]
@@ -36,9 +38,12 @@ def mapear_banco_para_itens(linhas: List[Dict[str, Any]]) -> List[CanonicalItem]
         familia = padrao.get("familia_produto")
         grupo = padrao.get("grupo_convenio")
 
+        # Mapeia operação exatamente conforme coluna "Tipo de Contrato"
         operacao = _mapear_operacao(row.get("Tipo de Contrato", ""))
 
-        complemento = montar_complemento(id_raw, operacao, produto_nome)
+        
+        nomenclatura_original = row.get("Tabela/Nome do Produto", "")
+        complemento = montar_complemento(id_raw, operacao, nomenclatura_original)
 
         extras = {
             "Família Produto": familia or "",
@@ -68,7 +73,7 @@ def mapear_interno_para_itens(linhas: List[Dict[str, Any]]) -> List[CanonicalIte
 
     for row in linhas:
         if row.get("Término", "").strip():
-            continue  # linha encerrada no interno = ignorada
+            continue  # Linha encerrada no interno é ignorada
 
         item = CanonicalItem(
             instituicao=row.get("Instituição", ""),
@@ -88,13 +93,29 @@ def mapear_interno_para_itens(linhas: List[Dict[str, Any]]) -> List[CanonicalIte
 
 
 def _mapear_operacao(txt: str) -> str:
-    t = (txt or "").upper()
-    if "PORT" in t:
-        return "PORTABILIDADE"
-    if "REFIN" in t and "PORT" in t:
-        return "PORTAB/REFIN"
-    if "CART" in t:
-        return "CARTÃO"
-    if "NOVO" in t:
+    """
+    Mapeamento EXATO baseado nos valores reais enviados pelo banco HOPE na coluna 'Tipo de Contrato':
+        - Contrato Novo
+        - Portabilidade
+        - Refin-Portabilidade
+        - Cartão C/ Saque
+    """
+    if not txt:
+        return ""
+
+    t = txt.strip().upper()
+
+    if t == "CONTRATO NOVO":
         return "NOVO"
-    return t or ""
+
+    if t == "PORTABILIDADE":
+        return "PORTABILIDADE"
+
+    if t == "REFIN-PORTABILIDADE":
+        return "PORTAB/REFIN"
+
+    if t in ("CARTÃO C/ SAQUE", "CARTAO C/ SAQUE"):
+        return "CARTÃO"
+
+    # Caso venha algum novo tipo desconhecido no futuro
+    return t

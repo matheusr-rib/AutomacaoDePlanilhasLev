@@ -1,25 +1,18 @@
 import os
 import json
 from typing import Dict, Any, Tuple, Optional
-
-import openai
-
+from openai import OpenAI
 
 class MotorIA:
     """
     Motor de padronização via OpenAI.
-    Não grava nada em banco e NÃO aprende automaticamente.
-    Todas as sugestões são logadas externamente para revisão.
+    Compatível com openai>=1.0.
     """
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
-        if self.api_key:
-            openai.api_key = self.api_key
+        self.client = OpenAI(api_key=self.api_key)
 
-    # ============================================================
-    # PROMPT MESTRE OFICIAL — TOTALMENTE INCORPORADO AQUI
-    # ============================================================
     @property
     def _prompt_mestre(self) -> str:
         return """
@@ -280,25 +273,138 @@ Retorne *APENAS* um JSON válido:
             "grupo_convenio": "PREFEITURAS"
           }
 
-        """.strip()
+        ==============================
+        🔹 REGRAS ESPECIAIS PARA PORTABILIDADE
+        ==============================
 
-    # ============================================================
-    # FUNÇÃO PRINCIPAL — CHAMA A OPENAI
-    # ============================================================
+        Quando o produto ou convênio indicar COMBO:
+
+        1. A IA NÃO deve montar nome completo de produto baseado no texto bruto.
+        2. A IA deve identificar APENAS:
+        - o convênio padronizado,
+        - a família,
+        - o grupo,
+        - e a taxa usada no REFIN (apenas REFIN, não PORT).
+        - a taxa usado no REFIN é a que está logo após REFIN
+        - nunca use a taxa após PORT para formar o produto
+        3. A IA NÃO deve incluir "PORT", "PORTABILIDADE", "PORTAB", "COMBO", "REFIN", "PORT COMBO" no nome do produto.
+        4. A IA deve montar o produto exatamente como qualquer outro:
+        <CONVENIO PADRONIZADO COM PONTO> - <TAXA REFIN>%
+
+        5. A taxa da operação PORT (PORT 1,49% A 2,50%) NÃO deve ser usada no produto — ela será usada apenas no COMPLEMENTO pelo backend.
+
+        ==============================
+        🔹 EXEMPLOS DE PORTABILIDADE — ENTRADA E SAÍDA CORRETAS
+        ==============================
+
+        Entrada:
+        COMBO - GOV ACRE - PORT 1.49% A 2.50% - REFIN 2.10%
+        Saída:
+        {
+        "produto_padronizado": "GOV. AC - 2,10%",
+        "convenio_padronizado": "GOV-AC",
+        "familia_produto": "GOVERNOS",
+        "grupo_convenio": "ESTADUAL"
+        }
+
+        Entrada:
+        COMBO - GOV AMAZONAS - PORT 1.47% A 2.50% - REFIN 2.10%
+        Saída:
+        {
+        "produto_padronizado": "GOV. AM - 2,10%",
+        "convenio_padronizado": "GOV-AM",
+        "familia_produto": "GOVERNOS",
+        "grupo_convenio": "ESTADUAL"
+        }
+
+        Entrada:
+        COMBO - GOV GOIÁS - PORT 1.79% A 2.35% - REFIN 2.15%
+        Saída:
+        {
+        "produto_padronizado": "GOV. GO - 2,15%",
+        "convenio_padronizado": "GOV-GO",
+        "familia_produto": "GOVERNOS",
+        "grupo_convenio": "ESTADUAL"
+        }
+
+        Entrada:
+        COMBO - GOV SP - SEC EDUCAÇÃO - PORT 1.79% A 2.50% - REFIN 2.45%
+        Saída:
+        {
+        "produto_padronizado": "GOV. SP - SEC EDUCACAO - 2,45%",
+        "convenio_padronizado": "GOV-SP",
+        "familia_produto": "GOVERNOS",
+        "grupo_convenio": "ESTADUAL"
+        }
+
+        Entrada:
+        COMBO - PREF SP - PORT 1.50% A 2.49% - REFIN 2.19%
+        Saída:
+        {
+        "produto_padronizado": "PREF. SAO PAULO - 2,19%",
+        "convenio_padronizado": "PREF. SAO PAULO SP",
+        "familia_produto": "PREFEITURAS",
+        "grupo_convenio": "PREFEITURAS"
+        }
+
+        Entrada:
+        COMBO - PREF MANAUS - PORT 1.40% A 2.10% - REFIN 1.95%
+        Saída:
+        {
+        "produto_padronizado": "PREF. MANAUS - 1,95%",
+        "convenio_padronizado": "PREF. MANAUS AM",
+        "familia_produto": "PREFEITURAS",
+        "grupo_convenio": "PREFEITURAS"
+        }
+
+        Entrada:
+        PORTAB - TJ SP - PORT 1.20% A 2.30% - REFIN 1.85%
+        Saída:
+        {
+        "produto_padronizado": "TJ - SP - 1,85%",
+        "convenio_padronizado": "TJ | SP",
+        "familia_produto": "TRIBUNAIS",
+        "grupo_convenio": "TRIBUNAIS"
+        }
+
+        Entrada:
+        COMBO - AMAZONPREV - PORT 1.30% A 2.00% - REFIN 1.70%
+        Convênio bruto: AMAZONPREV
+        Saída:
+        {
+        "produto_padronizado": "PREF. MANAUS - AMAZONPREV - 1,70%",
+        "convenio_padronizado": "PREF. MANAUS AM",
+        "familia_produto": "PREFEITURAS",
+        "grupo_convenio": "PREFEITURAS"
+        }
+
+        Entrada:
+        PORT GOV RJ - PORT 1.60% A 2.20% - REFIN 2.05%
+        Saída:
+        {
+        "produto_padronizado": "GOV. RJ - 2,05%",
+        "convenio_padronizado": "GOV-RJ",
+        "familia_produto": "GOVERNOS",
+        "grupo_convenio": "ESTADUAL"
+        }
+
+        Entrada:
+        COMBO - PREF UBERLANDIA - DEMAE - PORT 1.58% A 2.40% - REFIN 2.11%
+        Saída:
+        {
+        "produto_padronizado": "PREF. UBERLANDIA - DEMAE - 2,11%",
+        "convenio_padronizado": "PREF. UBERLANDIA MG",
+        "familia_produto": "PREFEITURAS",
+        "grupo_convenio": "PREFEITURAS"
+        }
+
+      """.strip()
+
     def sugerir_padrao(self, entrada: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
         """
-        Entrada:
-            - id_raw
-            - produto_raw
-            - convenio_raw
-            - taxa_raw
-            - prazo_raw
-
-        Retorno:
-            (dict padronizado, confiança)
+        Envia dados para a IA e retorna o JSON padronizado.
         """
 
-        # Conteúdo contextual enviado à IA
         prompt_usuario = f"""
 DADOS DE ENTRADA:
 
@@ -308,31 +414,27 @@ Convênio bruto: {entrada.get("convenio_raw")}
 Taxa: {entrada.get("taxa_raw")}
 Prazo: {entrada.get("prazo_raw")}
 
-RETORNE APENAS JSON VÁLIDO. SEM TEXTO EXTRA.
+RETORNE APENAS JSON VÁLIDO.
 """
 
-        # ================================
-        # Tenta chamar a IA REAL
-        # ================================
         try:
-            resposta = openai.ChatCompletion.create(
+            resposta = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 temperature=0.0,
                 messages=[
                     {"role": "system", "content": self._prompt_mestre},
                     {"role": "user", "content": prompt_usuario},
-                ],
+                ]
             )
 
-            conteudo = resposta.choices[0].message["content"]
-
+            conteudo = resposta.choices[0].message.content
             dados = json.loads(conteudo)
 
             sugestao = {
                 "produto_padronizado": dados.get("produto_padronizado"),
                 "convenio_padronizado": dados.get("convenio_padronizado"),
                 "familia_produto": dados.get("familia_produto"),
-                "grupo_convenio": dados.get("grupo_convenio"),
+                "grupo_convenio": dados.get("grupo_convenio")
             }
 
             confianca = float(dados.get("confianca", 0.8))
@@ -343,12 +445,9 @@ RETORNE APENAS JSON VÁLIDO. SEM TEXTO EXTRA.
             print("⚠ ERRO AO CHAMAR IA:", e)
             print("→ Usando fallback.")
 
-            # ================================
-            # FALLBACK (IA offline / erro)
-            # ================================
             return {
                 "produto_padronizado": entrada.get("produto_raw"),
                 "convenio_padronizado": entrada.get("convenio_raw"),
                 "familia_produto": None,
-                "grupo_convenio": None,
+                "grupo_convenio": None
             }, 0.3
