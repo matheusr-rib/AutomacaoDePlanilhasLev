@@ -1,63 +1,184 @@
-from typing import Dict, Any, Tuple
+from __future__ import annotations
+
 from pathlib import Path
-import json
+from typing import Dict, Any, Tuple, Optional, Set
+import re
 
 from .motor_ia import MotorIA
 from .gerenciador_logs import GerenciadorLogs
+from .dicionario_cache import DicionarioCache
+
+
+# taxa SEMPRE no final, ex: "2,19%"
+_TAXA_FIM_REGEX = re.compile(r"(\d{1,2}[.,]\d{2})%$")
+
+
+def extrair_taxa_da_nomenclatura(produto: Any) -> str:
+    """
+    Extrai a taxa do final da nomenclatura do produto.
+    Ex:
+      'GOV. RO - 1,76%' -> '1,76%'
+    """
+    if produto is None:
+        return ""
+    s = str(produto).strip()
+    if not s:
+        return ""
+
+    m = _TAXA_FIM_REGEX.search(s)
+    if not m:
+        return ""
+
+    return f"{m.group(1)}%"
+
+
+def _normalizar_numero_str(valor: Any, casas: int = 2) -> str:
+    if valor is None:
+        return ""
+    s = str(valor).strip()
+    if not s:
+        return ""
+
+    s = s.replace("%", "").strip()
+
+    try:
+        if "," in s and "." in s:
+            s_num = s.replace(".", "").replace(",", ".")
+        else:
+            s_num = s.replace(",", ".")
+        f = float(s_num)
+        return f"{f:.{casas}f}"
+    except Exception:
+        return s.replace(" ", "").upper()
+
+
+def _normalizar_prazo_str(valor: Any) -> str:
+    if valor is None:
+        return ""
+    s = str(valor).strip()
+    if not s:
+        return ""
+    return s.replace(" ", "").replace("/", "-").upper()
 
 
 class ServicoPadronizacao:
     """
-    Pipeline:
-    1) tenta dicionário manual (cache_manual.json) com chave: id + taxa + prazo
-    2) (futuro) tenta heurísticas usando a base interna
-    3) chama IA
-    4) loga sugestão para revisão
+    Serviço de padronização com CACHE REAL.
+
+    Ordem:
+    1) cache em memória (execução)
+    2) cache persistido (JSON)
+    3) IA (fallback)
     """
 
-    def __init__(self, caminho_dic_manual: Path | None = None):
-        self.caminho_dic_manual = caminho_dic_manual or Path("padronizacao") / "dicionario_manual.json"
-        self.dic_manual = self._carregar_dicionario()
+    def __init__(
+        self,
+        caminho_cache: Optional[Path] = None,
+        caminho_csv_logs: Optional[Path] = None,
+    ):
+        self.cache = DicionarioCache(
+            caminho_cache or Path("padronizacao") / "dicionario_manual.json"
+        )
         self.ia = MotorIA()
-        self.logger = GerenciadorLogs()
+        self.logger = GerenciadorLogs(caminho_csv_logs)
 
-    def _carregar_dicionario(self) -> Dict[str, Any]:
-        if self.caminho_dic_manual.exists():
-            with self.caminho_dic_manual.open(encoding="utf-8") as f:
-                return json.load(f)
-        return {}
+        self._cache_execucao: Dict[str, Dict[str, Any]] = {}
+        self._logadas: Set[str] = set()
 
+        # MÉTRICAS DA EXECUÇÃO
+        self.metricas = {
+            "consultas_cache": 0,
+            "hits_cache": 0,
+            "chamadas_ia": 0,
+            "linhas_csv": 0,
+        }
+
+    # ==========================================================
+    # CACHE AUTOMÁTICO A PARTIR DO INTERNO
+    # ==========================================================
+    def atualizar_cache_com_interno(self, linhas_interno: list[Dict[str, Any]]) -> int:
+        """
+        Alimenta o cache automaticamente usando a planilha interna (histórico validado).
+
+        - NÃO sobrescreve chaves existentes
+        - Usa a TAXA extraída da nomenclatura do Produto
+        """
+        novas = 0
+
+        for row in linhas_interno:
+            if str(row.get("Término", "")).strip():
+                continue
+
+            produto = str(row.get("Produto", "")).strip()
+            taxa_raw = extrair_taxa_da_nomenclatura(produto)
+
+            entrada = {
+                "id_raw": str(row.get("Id Tabela Banco", "")).strip(),
+                "taxa_raw": taxa_raw,
+                "prazo_raw": str(row.get("Parc. Atual", "")).strip(),
+            }
+
+            chave = self._gerar_chave_manual(entrada)
+            if not chave or chave in self.cache:
+                continue
+
+            padrao = {
+                "produto_padronizado": produto,
+                "convenio_padronizado": str(row.get("Convênio", "")).strip(),
+                "familia_produto": str(row.get("Família Produto", "")).strip(),
+                "grupo_convenio": str(row.get("Grupo Convênio", "")).strip(),
+            }
+
+            if any(v for v in padrao.values()):
+                self.cache.set(chave, padrao)
+                novas += 1
+
+        if novas:
+            self.cache.salvar()
+
+        return novas
+
+    # ==========================================================
+    # PADRONIZAÇÃO (CACHE -> IA)
+    # ==========================================================
     def padronizar(self, entrada: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
-        """
-        entrada deve conter:
-        - id_raw: Id do Produto na Origem
-        - taxa_raw: Taxa a.m
-        - prazo_raw: parc_atual ou Prazo Inicial/Prazo Final compactado
-        - produto_raw, convenio_raw (para contexto da IA)
-        """
         chave = self._gerar_chave_manual(entrada)
 
-        # 1) dicionário manual (aprendizado validado)
-        if chave in self.dic_manual:
-            return self.dic_manual[chave], 1.0
+        self.metricas["consultas_cache"] += 1
 
-        # 2) heurísticas com base interna (pode ser implementado depois)
+        # cache da execução
+        if chave in self._cache_execucao:
+            self.metricas["hits_cache"] += 1
+            return self._cache_execucao[chave], 0.99
 
-        # 3) IA
+        # cache persistido
+        achado = self.cache.get(chave)
+        if achado is not None:
+            self.metricas["hits_cache"] += 1
+            return achado, 1.0
+
+        # IA (fallback)
+        self.metricas["chamadas_ia"] += 1
         sugestao, confianca = self.ia.sugerir_padrao(entrada)
 
-        # 4) log para revisão manual
-        self.logger.registrar_sugestao(entrada, sugestao, confianca)
+        self._cache_execucao[chave] = sugestao
+
+        if chave and chave not in self._logadas:
+            self.logger.registrar_sugestao(chave, entrada, sugestao, confianca)
+            self.metricas["linhas_csv"] += 1
+            self._logadas.add(chave)
 
         return sugestao, confianca
 
+    # ==========================================================
+    # CHAVE DO CACHE
+    # ==========================================================
     def _gerar_chave_manual(self, entrada: Dict[str, Any]) -> str:
-        """
-        Gera uma chave única textual para lookup no dicionário manual:
-        id_raw | taxa_raw | prazo_raw
-        """
         id_raw = (entrada.get("id_raw") or "").strip().upper()
-        taxa_raw = (entrada.get("taxa_raw") or "").strip().upper()
-        prazo_raw = (entrada.get("prazo_raw") or "").strip().upper()
+        if not id_raw:
+            return ""
+
+        taxa_raw = _normalizar_numero_str(entrada.get("taxa_raw"), casas=2).upper()
+        prazo_raw = _normalizar_prazo_str(entrada.get("prazo_raw"))
 
         return f"{id_raw}|{taxa_raw}|{prazo_raw}"

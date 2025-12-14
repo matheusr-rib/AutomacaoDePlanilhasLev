@@ -1,54 +1,94 @@
-# api/controllers/promover_padroes.py
-
 from pathlib import Path
+from typing import Dict, Any
+
 import csv
-import json
+from openpyxl import load_workbook
 
 from padronizacao.servico_padronizacao import ServicoPadronizacao
 
 
-def promover_padroes(caminho_csv_corrigido: Path) -> None:
+def promover_padroes(caminho_validacao: Path):
     """
-    Lê o CSV corrigido (aprovado/corrigido_para preenchidos)
-    e atualiza o dicionario_manual.json com os novos padrões.
-
-    Chave usada: id_raw | taxa_raw | prazo_raw
+    Lê arquivo de validação humana (.csv OU .xlsx) e
+    atualiza o cache JSON antes da execução principal.
     """
     servico = ServicoPadronizacao()
-    dic = servico.dic_manual
+    atualizados = 0
 
-    with caminho_csv_corrigido.open(newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+    if caminho_validacao.suffix.lower() == ".csv":
+        linhas = _ler_csv(caminho_validacao)
 
-        for row in reader:
-            aprovado_raw = (row.get("aprovado") or "").strip().lower()
-            corrigido = (row.get("corrigido_para") or "").strip()
+    elif caminho_validacao.suffix.lower() == ".xlsx":
+        linhas = _ler_xlsx(caminho_validacao)
 
-            aprovado = aprovado_raw in {"sim", "true", "1", "ok", "x"}
+    else:
+        raise ValueError(
+            "Arquivo de validação deve ser .csv ou .xlsx"
+        )
 
-            if not aprovado and not corrigido:
-                continue
+    for row in linhas:
+        chave = (row.get("chave_cache") or "").strip()
+        if not chave:
+            continue
 
-            id_raw = (row.get("entrada_id_raw") or "").strip()
-            taxa_raw = (row.get("entrada_taxa_raw") or "").strip()
-            prazo_raw = (row.get("entrada_prazo_raw") or "").strip()
+        aprovado = (row.get("aprovado") or "").strip().upper()
+        if aprovado != "SIM":
+            continue
 
-            chave = f"{id_raw.strip().upper()}|{taxa_raw.strip().upper()}|{prazo_raw.strip().upper()}"
+        valor = {
+            "produto_padronizado": (
+                row.get("produto_corrigido")
+                or row.get("ia_produto_padronizado")
+            ),
+            "convenio_padronizado": (
+                row.get("convenio_corrigido")
+                or row.get("ia_convenio_padronizado")
+            ),
+            "familia_produto": (
+                row.get("familia_corrigida")
+                or row.get("ia_familia_produto")
+            ),
+            "grupo_convenio": (
+                row.get("grupo_corrigido")
+                or row.get("ia_grupo_convenio")
+            ),
+        }
 
-            if corrigido:
-                produto_final = corrigido
-            else:
-                produto_final = row.get("saida_produto") or row.get("entrada_produto_raw") or ""
+        servico.cache.set(chave, valor, overwrite=True)
+        atualizados += 1
 
-            convenio_final = row.get("saida_convenio") or row.get("entrada_convenio_raw") or ""
+    if atualizados:
+        servico.cache.salvar()
 
-            dic[chave] = {
-                "produto_padronizado": produto_final,
-                "convenio_padronizado": convenio_final,
-                "familia_produto": row.get("saida_familia") or "",
-                "grupo_convenio": row.get("saida_grupo") or "",
-            }
+    print(f"Padrões atualizados no cache: {atualizados}")
 
-    caminho_dic = servico.caminho_dic_manual
-    with caminho_dic.open("w", encoding="utf-8") as f:
-        json.dump(dic, f, ensure_ascii=False, indent=2)
+
+# ==========================================================
+# LEITORES
+# ==========================================================
+
+def _ler_csv(caminho: Path):
+    with caminho.open("r", encoding="utf-8", errors="replace") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        return list(reader)
+
+
+def _ler_xlsx(caminho: Path):
+    wb = load_workbook(caminho, data_only=True)
+    ws = wb.active
+
+    headers = []
+    linhas = []
+
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0:
+            headers = [str(c).strip() if c else "" for c in row]
+            continue
+
+        linha = {}
+        for h, v in zip(headers, row):
+            linha[h] = v
+
+        linhas.append(linha)
+
+    return linhas
