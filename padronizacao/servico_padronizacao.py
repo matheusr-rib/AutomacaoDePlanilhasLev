@@ -52,13 +52,41 @@ def _normalizar_numero_str(valor: Any, casas: int = 2) -> str:
         return s.replace(" ", "").upper()
 
 
-def _normalizar_prazo_str(valor: Any) -> str:
+def _normalizar_prazo_str(valor) -> str:
+    """
+    Normaliza prazo para chave canônica.
+
+    Regras:
+    - "96" -> "96"
+    - "96-96" -> "96"
+    - "96 A 96" -> "96"
+    - "96/96" -> "96"
+    - "96-120" -> "96-120"
+    - None / vazio -> ""
+    """
     if valor is None:
         return ""
-    s = str(valor).strip()
+
+    s = str(valor).strip().upper()
     if not s:
         return ""
-    return s.replace(" ", "").replace("/", "-").upper()
+
+    # extrai todos os números
+    nums = re.findall(r"\d+", s)
+
+    if not nums:
+        return ""
+
+    if len(nums) == 1:
+        return nums[0]
+
+    inicio, fim = nums[0], nums[1]
+
+    # 🔥 REGRA-CHAVE DO SEU BUG
+    if inicio == fim:
+        return inicio
+
+    return f"{inicio}-{fim}"
 
 
 class ServicoPadronizacao:
@@ -75,6 +103,7 @@ class ServicoPadronizacao:
         self,
         caminho_cache: Optional[Path] = None,
         caminho_csv_logs: Optional[Path] = None,
+        habilitar_logs: bool = False,
     ):
         self.cache = DicionarioCache(
             caminho_cache or Path("padronizacao") / "dicionario_manual.json"
@@ -182,3 +211,15 @@ class ServicoPadronizacao:
         prazo_raw = _normalizar_prazo_str(entrada.get("prazo_raw"))
 
         return f"{id_raw}|{taxa_raw}|{prazo_raw}"
+
+
+    def flush_logs(self) -> int:
+        """
+        Se logs estiverem habilitados, grava o buffer no CSV 1x no final.
+        Se logs estiverem desligados, retorna 0.
+        """
+        if hasattr(self, "logger") and self.logger:
+            # GerenciadorLogs precisa ter .flush()
+            if hasattr(self.logger, "flush"):
+                return self.logger.flush()
+        return 0
