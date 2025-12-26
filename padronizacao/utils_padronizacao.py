@@ -265,7 +265,9 @@ _RE_PREF_CIDADE_PURA = re.compile(r"EMPR[ÉE]STIMO\s*-\s*([A-Z ]{2,}?)\s*-\s*\d"
 
 _RE_SIGLA_CIDADE = re.compile(r"EMPR[ÉE]STIMO\s*-\s*([A-Z]{2,12})\s+([A-Z ]{3,}?)\s*-\s*\d", re.I)
 
-_RE_INST_PREV_SUB = re.compile(r"INST\s+PREV\s+([A-Z ]+?)\s*-\s*([A-Z]{3,})\s*-\s*\d", re.I)
+_RE_INST_PREV_SUB = re.compile(
+    r"(?:^|\b)INST\s+PREV\s+([A-Z\s]{2,}?)\s*-\s*([A-Z0-9]{2,})\b"
+)
 _RE_INST_PREV_GEN = re.compile(r"INST\s+PREV\s+(.+?)\s*-\s*\d", re.I)
 
 _RE_TJ_ESTADO = re.compile(r"TJ\s*-\s*([A-Z ]{2,})", re.I)
@@ -326,31 +328,45 @@ def extrair_sigla_e_cidade(texto: str) -> Optional[Tuple[str, str]]:
     return sigla, cidade
 
 
-def extrair_inst_prev_sub(texto: str):
+def extrair_inst_prev_sub(texto: str) -> tuple[str, str]:
     """
-    Extrai cidade + subinstituto em casos como:
-    INST PREV FORMIGA - PREVIFOR - 2,25%
+    Extrai INST PREV com subproduto:
+      "EMPRÉSTIMO - INST PREV VITÓRIA - IPAMV - 2.14%"
+        -> ("VITORIA", "IPAMV")
+
+    Normaliza tudo em ASCII/UPPER pra não morrer em acentos.
     """
-    m = re.search(
-        r"INST\s+PREV\s+([A-Z\s]+?)\s*-\s*([A-Z0-9]+)\s*-",
-        texto
-    )
+    if not texto:
+        return "", ""
+
+    t = ascii_upper(texto)
+    m = _RE_INST_PREV_SUB.search(t)
     if not m:
-        return None
+        return "", ""
 
-    cidade = m.group(1).strip()
-    sub = m.group(2).strip()
+    cidade = " ".join((m.group(1) or "").split()).strip()
+    subproduto = (m.group(2) or "").strip()
 
-    return cidade, sub
+    return cidade, subproduto
+
 
 
 def extrair_inst_prev_gen(texto: str) -> str:
     """
-    INST PREV GUARAPUAVA - 2.15%
+    Extrai INST PREV sem subproduto:
+      "EMPRÉSTIMO - INST PREV ITANHAEM - 1.99%"
+        -> "ITANHAEM"
     """
+    if not texto:
+        return ""
+
     t = ascii_upper(texto)
-    m = _RE_INST_PREV_GEN.search(t)
-    return normalizar_cidade_prefeitura(m.group(1).strip()) if m else ""
+    m = re.search(r"(?:^|\b)INST\s+PREV\s+([A-Z\s]{2,})\b", t)
+    if not m:
+        return ""
+
+    cidade = " ".join((m.group(1) or "").split()).strip()
+    return cidade
 
 
 def extrair_tj_uf(texto: str) -> Optional[str]:

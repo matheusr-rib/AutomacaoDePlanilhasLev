@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Set, List
 import re
-
+from .catalogos_inst_prev import cidade_por_inst_prev, uf_por_cidade_fallback
 from .motor_ia import MotorIA
 from .gerenciador_logs import GerenciadorLogs
 from .dicionario_cache import DicionarioCache
@@ -356,6 +356,76 @@ class ServicoPadronizacao:
                 "grupo_convenio": "PREFEITURAS",
             }
 
+
+        # ==================================================
+        # INST PREV (REGRA NOVA – ÚNICA)
+        # ==================================================
+        cidade_sub, subproduto = extrair_inst_prev_sub(texto)
+        if cidade_sub:
+            cidade = ascii_upper(cidade_sub)
+
+            if subproduto:
+                subproduto = ascii_upper(subproduto)
+                cidade_catalogo = cidade_por_inst_prev(subproduto)
+                if cidade_catalogo:
+                    cidade = cidade_catalogo
+
+            uf = (
+                self.indice.uf_prefeitura(cidade)
+                or uf_por_cidade_fallback(cidade)
+                or extrair_gov_uf(texto)
+                or extrair_gov_uf(conv)
+                or _extrair_uf_por_estado_no_texto(texto)
+                or _extrair_uf_por_estado_no_texto(conv)
+            )
+
+            if uf:
+                produto = self._montar_produto(f"PREF. {cidade}", subproduto, taxa, beneficio)
+                return {
+                    "produto_padronizado": produto,
+                    "convenio_padronizado": f"PREF. {cidade} {uf}",
+                    "familia_produto": "PREFEITURAS",
+                    "grupo_convenio": "PREFEITURAS",
+                }
+
+            produto = self._montar_produto(f"INST PREV {cidade}", subproduto, taxa, beneficio)
+            return {
+                "produto_padronizado": produto,
+                "convenio_padronizado": "",
+                "familia_produto": "MANUAL",
+                "grupo_convenio": "MANUAL",
+            }
+
+        cidade_gen = extrair_inst_prev_gen(texto) or extrair_inst_prev_gen(conv)
+        if cidade_gen:
+            cidade = ascii_upper(cidade_gen)
+
+            uf = (
+                self.indice.uf_prefeitura(cidade)
+                or uf_por_cidade_fallback(cidade)
+                or extrair_gov_uf(texto)
+                or extrair_gov_uf(conv)
+                or _extrair_uf_por_estado_no_texto(texto)
+                or _extrair_uf_por_estado_no_texto(conv)
+            )
+
+            produto = self._montar_produto(f"INST PREV {cidade}", "", taxa, beneficio)
+
+            if uf:
+                return {
+                    "produto_padronizado": produto,
+                    "convenio_padronizado": f"PREF. {cidade} {uf}",
+                    "familia_produto": "PREFEITURAS",
+                    "grupo_convenio": "PREFEITURAS",
+                }
+
+            return {
+                "produto_padronizado": produto,
+                "convenio_padronizado": "",
+                "familia_produto": "MANUAL",
+                "grupo_convenio": "MANUAL",
+            }
+
         # ==================================================
         # 0) CASO: "CARTAO BENEFICIO - CARTAO GOIAS - 4.50%"
         # ==================================================
@@ -551,77 +621,9 @@ class ServicoPadronizacao:
                     "familia_produto": "PREFEITURAS",
                     "grupo_convenio": "PREFEITURAS",
                 }
-
-        # ==================================================
-        # 10) INST PREV com subproduto (prioriza subproduto)
-        # ==================================================
-        inst_sub = extrair_inst_prev_sub(texto)
-        if inst_sub:
-            cidade, subproduto = inst_sub
-
-            # normaliza para bater com o índice/caches (ASCII/UPPER)
-            cidade = ascii_upper(cidade)
-            subproduto = ascii_upper(subproduto)
-
-            if cidade in {"SP"}:
-                cidade = "SAO PAULO"
-
-            uf = self.indice.uf_prefeitura(cidade)
-
-            if not uf:
-                uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
-
-            if uf:
-                convenio = f"PREF. {cidade} {uf}"
-                produto = self._montar_produto(f"PREF. {cidade}", subproduto, taxa, beneficio)
-                return {
-                    "produto_padronizado": produto,
-                    "convenio_padronizado": convenio,
-                    "familia_produto": "PREFEITURAS",
-                    "grupo_convenio": "PREFEITURAS",
-                }
-
-            produto = self._montar_produto(f"INST PREV {cidade}", subproduto, taxa, beneficio)
-            return {
-                "produto_padronizado": produto,
-                "convenio_padronizado": "",
-                "familia_produto": "MANUAL",
-                "grupo_convenio": "MANUAL",
-            }
-
-        # ==================================================
-        # 11) INST PREV genérico (sem subproduto)
-        # ==================================================
-        if "INST PREV" in texto:
-            cidade = extrair_inst_prev_gen(texto)
-            if cidade:
-                cidade = ascii_upper(cidade)
-
-                if cidade in {"SP"}:
-                    cidade = "SAO PAULO"
-
-                uf = self.indice.uf_prefeitura(cidade)
-                if not uf:
-                    uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
-
-                produto = self._montar_produto(f"INST PREV {cidade}", "", taxa, beneficio)
-
-                if uf:
-                    return {
-                        "produto_padronizado": produto,
-                        "convenio_padronizado": f"PREF. {cidade} {uf}",
-                        "familia_produto": "PREFEITURAS",
-                        "grupo_convenio": "PREFEITURAS",
-                    }
-
-                return {
-                    "produto_padronizado": produto,
-                    "convenio_padronizado": "",
-                    "familia_produto": "MANUAL",
-                    "grupo_convenio": "MANUAL",
-                }
-
         return None
+
+        
 
     # ======================================================
     # CHAVE DO CACHE
