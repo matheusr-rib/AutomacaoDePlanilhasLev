@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Set, List
 import re
-
 from .catalogos_inst_prev import cidade_por_inst_prev, uf_por_cidade_fallback
 from .motor_ia import MotorIA
 from .gerenciador_logs import GerenciadorLogs
@@ -55,8 +54,6 @@ def _normalizar_numero_str(valor: Any, casas: int = 2) -> str:
 def _normalizar_prazo_str(valor) -> str:
     """
     Normaliza prazo para chave canônica.
-    - "120" == "120-120" -> "120"
-    - "120 a 144" -> "120-144"
     """
     if valor is None:
         return ""
@@ -83,6 +80,7 @@ def _normalizar_prazo_str(valor) -> str:
 # SANITIZAÇÃO FINAL (OBRIGATÓRIA)
 # ==========================================================
 
+# palavras proibidas no PRODUTO (nunca podem aparecer no produto_padronizado)
 _PALAVRAS_PROIBIDAS_PRODUTO: List[str] = [
     "EMPRESTIMO", "EMPRÉSTIMO",
     "CARTAO", "CARTÃO",
@@ -94,6 +92,7 @@ _PALAVRAS_PROIBIDAS_PRODUTO: List[str] = [
     "LIQUIDO", "LÍQUIDO",
 ]
 
+# regex pra remover tokens proibidos como palavras inteiras
 _RE_PROIBIDAS = re.compile(
     r"\b(" + "|".join(
         sorted({ascii_upper(p) for p in _PALAVRAS_PROIBIDAS_PRODUTO}, key=len, reverse=True)
@@ -104,7 +103,7 @@ _RE_PROIBIDAS = re.compile(
 def _limpar_produto_final(produto: str) -> str:
     """
     Garante que produto_padronizado:
-    - esteja ASCII/UPPER
+    - esteja ASCII/UPPER (ascii_upper)
     - NÃO contenha palavras proibidas
     - não fique com hífens quebrados tipo 'GOV. AC - - 1,90%'
     """
@@ -120,6 +119,7 @@ def _limpar_produto_final(produto: str) -> str:
     # se terminar com "-" por remoção de token, remove
     t = re.sub(r"\s*-\s*$", "", t).strip()
 
+    # se ficar vazio, devolve vazio (o caller decide fallback)
     return t
 
 
@@ -160,7 +160,6 @@ def _extrair_uf_solto(texto_ascii: str) -> Optional[str]:
     m = re.search(r"\b([A-Z]{2})\b", t)
     if not m:
         return None
-
     uf = m.group(1)
     if uf in {
         "TJ", "GO", "SP", "RJ", "MG", "ES", "BA", "PR", "SC", "RS", "DF", "MT", "MS",
@@ -178,9 +177,9 @@ def _extrair_uf_solto(texto_ascii: str) -> Optional[str]:
 class ServicoPadronizacao:
     """
     Ordem:
-    1) cache em memória (execução) por chave canônica (id|taxa|prazo)
+    1) cache em memória (execução)
     2) cache persistido (JSON)
-    3) regras determinísticas (inclui índice/catálogos)
+    3) regras determinísticas
     4) IA (fallback)
     """
 
@@ -196,13 +195,7 @@ class ServicoPadronizacao:
         self.ia = MotorIA()
         self.logger = GerenciadorLogs(caminho_csv_logs, habilitado=habilitar_logs)
 
-        # cache por chave (id|taxa|prazo) - garante comportamento atual
         self._cache_execucao: Dict[str, Dict[str, Any]] = {}
-
-        # cache adicional por "texto normalizado" (evita repetir regra/IA quando muda só ID/prazo)
-        # OBS: isso NÃO substitui o cache por chave; é só um turbo.
-        self._cache_por_texto: Dict[str, Dict[str, Any]] = {}
-
         self._logadas: Set[str] = set()
 
         self.metricas = {
@@ -210,7 +203,6 @@ class ServicoPadronizacao:
             "hits_cache": 0,
             "chamadas_ia": 0,
             "linhas_csv": 0,
-            "hits_cache_texto": 0,
         }
 
         self.indice = IndiceCache()
@@ -271,38 +263,22 @@ class ServicoPadronizacao:
     # PADRONIZAÇÃO PRINCIPAL
     # ======================================================
     def padronizar(self, entrada: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
-        """
-        Mantém 100% do comportamento atual:
-        - primeiro tenta cache por chave (id|taxa|prazo)
-        - depois cache persistido
-        - depois regras
-        - por fim IA
-
-        Turbo:
-        - antes da IA, tenta cache por texto (produto_raw + convenio_raw + taxa + prazo normalizados)
-        """
         chave = self._gerar_chave_manual(entrada)
         self.metricas["consultas_cache"] += 1
 
-        # 1) cache execução por chave
-        if chave and chave in self._cache_execucao:
+        if chave in self._cache_execucao:
             self.metricas["hits_cache"] += 1
             return self._cache_execucao[chave], 0.99
 
-        # 2) cache persistido por chave
-        if chave:
-            achado = self.cache.get(chave)
-            if achado is not None:
-                self.metricas["hits_cache"] += 1
-                achado = dict(achado)
-                if achado.get("produto_padronizado"):
-                    achado["produto_padronizado"] = _limpar_produto_final(achado["produto_padronizado"])
-                achado = _garantir_familia_grupo(achado)
-                # salva na execução por chave
-                self._cache_execucao[chave] = achado
-                return achado, 1.0
+        achado = self.cache.get(chave)
+        if achado is not None:
+            self.metricas["hits_cache"] += 1
+            achado = dict(achado)
+            if achado.get("produto_padronizado"):
+                achado["produto_padronizado"] = _limpar_produto_final(achado["produto_padronizado"])
+            achado = _garantir_familia_grupo(achado)
+            return achado, 1.0
 
-        # 3) regras determinísticas
         padrao = self._padronizar_por_regra(entrada)
         if padrao is not None:
             padrao = dict(padrao)
@@ -310,26 +286,9 @@ class ServicoPadronizacao:
                 padrao["produto_padronizado"] = _limpar_produto_final(padrao["produto_padronizado"])
             padrao = _garantir_familia_grupo(padrao)
 
-            if chave:
-                self._cache_execucao[chave] = padrao
-
-            # cache extra por texto (pra evitar trabalho repetido em massa)
-            key_texto = self._gerar_chave_texto(entrada)
-            if key_texto:
-                self._cache_por_texto[key_texto] = padrao
-
+            self._cache_execucao[chave] = padrao
             return padrao, 0.98
 
-        # 3.5) cache por texto (antes de IA) - turbo
-        key_texto = self._gerar_chave_texto(entrada)
-        if key_texto and key_texto in self._cache_por_texto:
-            self.metricas["hits_cache_texto"] += 1
-            padrao = dict(self._cache_por_texto[key_texto])
-            if chave:
-                self._cache_execucao[chave] = padrao
-            return padrao, 0.97
-
-        # 4) IA fallback
         self.metricas["chamadas_ia"] += 1
         sugestao, confianca = self.ia.sugerir_padrao(entrada)
 
@@ -338,11 +297,7 @@ class ServicoPadronizacao:
             sugestao["produto_padronizado"] = _limpar_produto_final(sugestao["produto_padronizado"])
         sugestao = _garantir_familia_grupo(sugestao)
 
-        if chave:
-            self._cache_execucao[chave] = sugestao
-
-        if key_texto:
-            self._cache_por_texto[key_texto] = sugestao
+        self._cache_execucao[chave] = sugestao
 
         if chave and chave not in self._logadas:
             self.logger.registrar_sugestao(chave, entrada, sugestao, confianca)
@@ -357,7 +312,7 @@ class ServicoPadronizacao:
     def _montar_produto(self, prefixo: str, meio: str, taxa: str, beneficio: bool) -> str:
         """
         prefixo: 'PREF. COTIA' / 'GOV. SP' / 'TJ - MG' / 'INST PREV GUARAPUAVA'
-        meio: 'SEPREM' / 'SEC EDUCACAO' / 'HSPM' / 'IPAMV' / ''
+        meio: 'SEPREM' / 'SEC EDUCACAO' / 'HSPM' / ''
         beneficio insere: ' - BENEFICIO' antes da taxa
         """
         base = prefixo.strip()
@@ -369,41 +324,16 @@ class ServicoPadronizacao:
             return f"{base} - BENEFICIO - {taxa}"
         return f"{base} - {taxa}"
 
-    def _gerar_chave_texto(self, entrada: Dict[str, Any]) -> str:
-        """
-        Chave de “conteúdo” para reaproveitar padronização quando:
-        - o texto do produto/convenio é igual,
-        - taxa/prazo são iguais
-        Mesmo que o ID mude, ainda dá pra aproveitar regra/IA.
-
-        Isso melhora muito performance em massa.
-        """
-        produto_raw = entrada.get("produto_raw") or ""
-        convenio_raw = entrada.get("convenio_raw") or ""
-        if not produto_raw and not convenio_raw:
-            return ""
-
-        # normaliza taxa/prazo igual ao que você usa na chave principal (pra não dar mismatch)
-        taxa_raw_norm = _normalizar_numero_str(entrada.get("taxa_raw"), casas=2).upper()
-        prazo_raw_norm = _normalizar_prazo_str(entrada.get("prazo_raw"))
-
-        return f"{ascii_upper(produto_raw)}|{ascii_upper(convenio_raw)}|{taxa_raw_norm}|{prazo_raw_norm}"
-
     # ======================================================
     # REGRAS DETERMINÍSTICAS (ORDEM IMPORTA)
     # ======================================================
     def _padronizar_por_regra(self, entrada: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        produto_raw = entrada.get("produto_raw", "") or ""
+        texto_raw = entrada.get("produto_raw", "") or ""
         convenio_raw = entrada.get("convenio_raw", "") or ""
 
-        # Early exit
-        if not produto_raw and not convenio_raw:
-            return None
-
-        texto = ascii_upper(produto_raw)
+        texto = ascii_upper(texto_raw)
         conv = ascii_upper(convenio_raw)
 
-        # Early exit (não tem pista nenhuma)
         if not texto and not conv:
             return None
 
@@ -412,6 +342,8 @@ class ServicoPadronizacao:
 
         # ==================================================
         # AMAZONPREV — regra direta (prefeitura de Manaus)
+        # Ex do banco: "EMPRÉSTIMO - AMAZONPREV - 2.50%"
+        # Saída: "PREF. MANAUS - AMAZONPREV - 2,50%" | convênio "PREF. MANAUS AM"
         # ==================================================
         if "AMAZONPREV" in texto or "AMAZONPREV" in conv:
             cidade = "MANAUS"
@@ -424,50 +356,31 @@ class ServicoPadronizacao:
                 "grupo_convenio": "PREFEITURAS",
             }
 
+
         # ==================================================
         # INST PREV (REGRA NOVA – ÚNICA)
-        #
-        # Caso A (COM sigla/subproduto):
-        #   "EMPRÉSTIMO - INST PREV VITÓRIA - IPAMV - 2.14%"
-        #   -> Produto:  "PREF. VITORIA - IPAMV - 2,14%"
-        #   -> Convênio: "PREF. VITORIA ES"
-        #
-        # Caso B (SEM sigla/subproduto):
-        #   "EMPRÉSTIMO - INST PREV ITANHAEM - 1.99%"
-        #   -> Produto:  "INST PREV ITANHAEM - 1,99%"
-        #   -> Convênio: "PREF. ITANHAEM SP" (se UF resolvida)
         # ==================================================
-        inst_sub = extrair_inst_prev_sub(texto)
-        if inst_sub:
-            cidade_sub, subproduto = inst_sub
-            cidade = ascii_upper(cidade_sub or "")
+        cidade_sub, subproduto = extrair_inst_prev_sub(texto)
+        if cidade_sub:
+            cidade = ascii_upper(cidade_sub)
 
-            subproduto_norm = ascii_upper(subproduto or "")
-            if subproduto_norm:
-                # tenta corrigir cidade pelo catálogo do instituto (sigla)
-                cidade_catalogo = cidade_por_inst_prev(subproduto_norm)
+            if subproduto:
+                subproduto = ascii_upper(subproduto)
+                cidade_catalogo = cidade_por_inst_prev(subproduto)
                 if cidade_catalogo:
                     cidade = cidade_catalogo
 
-            # resolve UF: indice -> fallback -> estado no texto -> UF solta
             uf = (
                 self.indice.uf_prefeitura(cidade)
                 or uf_por_cidade_fallback(cidade)
+                or extrair_gov_uf(texto)
+                or extrair_gov_uf(conv)
                 or _extrair_uf_por_estado_no_texto(texto)
                 or _extrair_uf_por_estado_no_texto(conv)
-                or _extrair_uf_solto(texto)
-                or _extrair_uf_solto(conv)
             )
 
-            # ✅ Se tem UF: vira prefeitura e segue teu padrão oficial
             if uf:
-                if subproduto_norm:
-                    # COM subproduto: "PREF. CIDADE - SIGLA - TAXA"
-                    produto = self._montar_produto(f"PREF. {cidade}", subproduto_norm, taxa, beneficio)
-                else:
-                    # SEM subproduto: "INST PREV CIDADE - TAXA" (exigência tua)
-                    produto = self._montar_produto(f"INST PREV {cidade}", "", taxa, beneficio)
-
+                produto = self._montar_produto(f"PREF. {cidade}", subproduto, taxa, beneficio)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": f"PREF. {cidade} {uf}",
@@ -475,12 +388,7 @@ class ServicoPadronizacao:
                     "grupo_convenio": "PREFEITURAS",
                 }
 
-            # ❗ Sem UF: ainda assim devolve “bonito”, mas marca MANUAL
-            if subproduto_norm:
-                produto = self._montar_produto(f"INST PREV {cidade}", subproduto_norm, taxa, beneficio)
-            else:
-                produto = self._montar_produto(f"INST PREV {cidade}", "", taxa, beneficio)
-
+            produto = self._montar_produto(f"INST PREV {cidade}", subproduto, taxa, beneficio)
             return {
                 "produto_padronizado": produto,
                 "convenio_padronizado": "",
@@ -488,7 +396,6 @@ class ServicoPadronizacao:
                 "grupo_convenio": "MANUAL",
             }
 
-        # INST PREV genérico (sem conseguir extrair subproduto)
         cidade_gen = extrair_inst_prev_gen(texto) or extrair_inst_prev_gen(conv)
         if cidade_gen:
             cidade = ascii_upper(cidade_gen)
@@ -496,10 +403,10 @@ class ServicoPadronizacao:
             uf = (
                 self.indice.uf_prefeitura(cidade)
                 or uf_por_cidade_fallback(cidade)
+                or extrair_gov_uf(texto)
+                or extrair_gov_uf(conv)
                 or _extrair_uf_por_estado_no_texto(texto)
                 or _extrair_uf_por_estado_no_texto(conv)
-                or _extrair_uf_solto(texto)
-                or _extrair_uf_solto(conv)
             )
 
             produto = self._montar_produto(f"INST PREV {cidade}", "", taxa, beneficio)
@@ -520,7 +427,7 @@ class ServicoPadronizacao:
             }
 
         # ==================================================
-        # 0) CARTAO BENEFICIO
+        # 0) CASO: "CARTAO BENEFICIO - CARTAO GOIAS - 4.50%"
         # ==================================================
         if "CARTAO BENEFICIO" in texto or ("CARTAO" in texto and "BENEFICIO" in texto):
             uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
@@ -536,7 +443,7 @@ class ServicoPadronizacao:
                 }
 
         # ==================================================
-        # 1) HSPM
+        # 1) HSPM (especial)
         # ==================================================
         if "HSPM" in texto:
             produto = self._montar_produto("PREF. SAO PAULO", "HSPM", taxa, beneficio)
@@ -584,7 +491,7 @@ class ServicoPadronizacao:
             uf = extrair_tj_uf(texto) or extrair_tj_uf(conv)
             if not uf:
                 estado = extrair_tj_estado(texto) or extrair_tj_estado(conv)
-                estado = (estado or "").strip()
+                estado = estado.strip()
                 if estado:
                     uf = ESTADO_PARA_UF.get(estado, "")
             if uf:
@@ -597,7 +504,7 @@ class ServicoPadronizacao:
                 }
 
         # ==================================================
-        # 5) COMBO/PORT com GOV
+        # 5) COMBO/PORT com GOV (NUNCA deixar PORT aparecer no produto)
         # ==================================================
         if "GOV" in texto and ("COMBO" in texto or "PORT" in texto or "REFIN" in texto):
             uf = extrair_gov_uf(texto) or extrair_gov_uf(conv)
@@ -629,7 +536,7 @@ class ServicoPadronizacao:
             }
 
         # ==================================================
-        # 6) GOV simples
+        # 6) GOV simples (sem combo/port)
         # ==================================================
         if "GOV" in texto or "GOV" in conv:
             uf = extrair_gov_uf(texto) or extrair_gov_uf(conv)
@@ -653,16 +560,16 @@ class ServicoPadronizacao:
                 }
 
         # ==================================================
-        # 7) PREF explícito
+        # 7) PREF explícito (PREF ...), incluindo PREF SP => SAO PAULO
         # ==================================================
         if "PREF" in texto or "PREF" in conv:
             cidade = extrair_pref_cidade_explicita(texto) or extrair_pref_cidade_explicita(conv)
             if cidade:
-                cidade = ascii_upper(cidade)
                 if cidade in {"SP", "SAO PAULO", "SAO-PAULO"}:
                     cidade = "SAO PAULO"
 
                 uf = self.indice.uf_prefeitura(cidade)
+
                 if not uf:
                     uf = _extrair_uf_solto(texto) or _extrair_uf_solto(conv) or "SP"
 
@@ -680,7 +587,6 @@ class ServicoPadronizacao:
         # ==================================================
         cidade_pura = extrair_cidade_pura(texto)
         if cidade_pura:
-            cidade_pura = ascii_upper(cidade_pura)
             if cidade_pura in {"SP"}:
                 cidade_pura = "SAO PAULO"
 
@@ -701,8 +607,6 @@ class ServicoPadronizacao:
         sigla_cidade = extrair_sigla_e_cidade(texto)
         if sigla_cidade:
             sigla, cidade = sigla_cidade
-            sigla = ascii_upper(sigla)
-            cidade = ascii_upper(cidade)
 
             if cidade in {"SP"}:
                 cidade = "SAO PAULO"
@@ -717,8 +621,9 @@ class ServicoPadronizacao:
                     "familia_produto": "PREFEITURAS",
                     "grupo_convenio": "PREFEITURAS",
                 }
-
         return None
+
+        
 
     # ======================================================
     # CHAVE DO CACHE
