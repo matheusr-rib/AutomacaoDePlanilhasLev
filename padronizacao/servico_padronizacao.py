@@ -93,7 +93,11 @@ _PALAVRAS_PROIBIDAS_PRODUTO: List[str] = [
 ]
 
 # regex pra remover tokens proibidos como palavras inteiras
-_RE_PROIBIDAS = re.compile(r"\b(" + "|".join(sorted({ascii_upper(p) for p in _PALAVRAS_PROIBIDAS_PRODUTO}, key=len, reverse=True)) + r")\b")
+_RE_PROIBIDAS = re.compile(
+    r"\b(" + "|".join(
+        sorted({ascii_upper(p) for p in _PALAVRAS_PROIBIDAS_PRODUTO}, key=len, reverse=True)
+    ) + r")\b"
+)
 
 
 def _limpar_produto_final(produto: str) -> str:
@@ -157,8 +161,11 @@ def _extrair_uf_solto(texto_ascii: str) -> Optional[str]:
     if not m:
         return None
     uf = m.group(1)
-    # evita pegar "TJ", "GOV", "PREF"
-    if uf in {"TJ", "GO", "SP", "RJ", "MG", "ES", "BA", "PR", "SC", "RS", "DF", "MT", "MS", "AM", "AC", "AL", "AP", "CE", "MA", "PA", "PB", "PE", "PI", "RN", "RO", "RR", "SE", "TO"}:
+    if uf in {
+        "TJ", "GO", "SP", "RJ", "MG", "ES", "BA", "PR", "SC", "RS", "DF", "MT", "MS",
+        "AM", "AC", "AL", "AP", "CE", "MA", "PA", "PB", "PE", "PI", "RN", "RO", "RR",
+        "SE", "TO"
+    }:
         return uf
     return None
 
@@ -266,7 +273,6 @@ class ServicoPadronizacao:
         achado = self.cache.get(chave)
         if achado is not None:
             self.metricas["hits_cache"] += 1
-            # sanitização final também no que vem do cache (segurança)
             achado = dict(achado)
             if achado.get("produto_padronizado"):
                 achado["produto_padronizado"] = _limpar_produto_final(achado["produto_padronizado"])
@@ -275,7 +281,6 @@ class ServicoPadronizacao:
 
         padrao = self._padronizar_por_regra(entrada)
         if padrao is not None:
-            # sanitização final obrigatória
             padrao = dict(padrao)
             if padrao.get("produto_padronizado"):
                 padrao["produto_padronizado"] = _limpar_produto_final(padrao["produto_padronizado"])
@@ -336,10 +341,25 @@ class ServicoPadronizacao:
         taxa = format_taxa_br(entrada.get("taxa_raw") or extrair_taxa_fim(texto))
 
         # ==================================================
+        # AMAZONPREV — regra direta (prefeitura de Manaus)
+        # Ex do banco: "EMPRÉSTIMO - AMAZONPREV - 2.50%"
+        # Saída: "PREF. MANAUS - AMAZONPREV - 2,50%" | convênio "PREF. MANAUS AM"
+        # ==================================================
+        if "AMAZONPREV" in texto or "AMAZONPREV" in conv:
+            cidade = "MANAUS"
+            uf = "AM"
+            produto = self._montar_produto(f"PREF. {cidade}", "AMAZONPREV", taxa, beneficio)
+            return {
+                "produto_padronizado": produto,
+                "convenio_padronizado": f"PREF. {cidade} {uf}",
+                "familia_produto": "PREFEITURAS",
+                "grupo_convenio": "PREFEITURAS",
+            }
+
+        # ==================================================
         # 0) CASO: "CARTAO BENEFICIO - CARTAO GOIAS - 4.50%"
         # ==================================================
         if "CARTAO BENEFICIO" in texto or ("CARTAO" in texto and "BENEFICIO" in texto):
-            # tenta inferir UF via nome de estado (GOIAS -> GO)
             uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
             if not uf and "GOIAS" in texto:
                 uf = "GO"
@@ -416,7 +436,6 @@ class ServicoPadronizacao:
         # ==================================================
         # 5) COMBO/PORT com GOV (NUNCA deixar PORT aparecer no produto)
         # ==================================================
-        # regra: se tiver GOV e tiver COMBO ou PORT ou REFIN -> usar taxa REFIN
         if "GOV" in texto and ("COMBO" in texto or "PORT" in texto or "REFIN" in texto):
             uf = extrair_gov_uf(texto) or extrair_gov_uf(conv)
             if not uf:
@@ -426,7 +445,6 @@ class ServicoPadronizacao:
 
             taxa_refin = extrair_taxa_refin(texto) or taxa
             derivado = ""
-            # tenta extrair derivado só se tiver algo tipo "GOV SP - SEFAZ - ..."
             if "COMBO" in texto:
                 derivado = extrair_derivado_gov_combo(texto, uf) or ""
             else:
@@ -434,7 +452,6 @@ class ServicoPadronizacao:
                 if m:
                     derivado = m.group(1).strip()
 
-            # se derivado capturou lixo proibido, zera
             if derivado and _RE_PROIBIDAS.search(derivado):
                 derivado = ""
 
@@ -454,7 +471,6 @@ class ServicoPadronizacao:
         if "GOV" in texto or "GOV" in conv:
             uf = extrair_gov_uf(texto) or extrair_gov_uf(conv)
             if not uf:
-                # casos como "GOV GOIAS" sem UF
                 uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
             if uf:
                 derivado = ""
@@ -479,13 +495,11 @@ class ServicoPadronizacao:
         if "PREF" in texto or "PREF" in conv:
             cidade = extrair_pref_cidade_explicita(texto) or extrair_pref_cidade_explicita(conv)
             if cidade:
-                # conserto: PREF SP => SAO PAULO
                 if cidade in {"SP", "SAO PAULO", "SAO-PAULO"}:
                     cidade = "SAO PAULO"
 
                 uf = self.indice.uf_prefeitura(cidade)
 
-                # se não achar no índice, tenta extrair uf de algum lugar
                 if not uf:
                     uf = _extrair_uf_solto(texto) or _extrair_uf_solto(conv) or "SP"
 
@@ -503,7 +517,6 @@ class ServicoPadronizacao:
         # ==================================================
         cidade_pura = extrair_cidade_pura(texto)
         if cidade_pura:
-            # conserto: se veio "SP" como cidade pura (caso zoado)
             if cidade_pura in {"SP"}:
                 cidade_pura = "SAO PAULO"
 
@@ -525,7 +538,6 @@ class ServicoPadronizacao:
         if sigla_cidade:
             sigla, cidade = sigla_cidade
 
-            # normalização cidade
             if cidade in {"SP"}:
                 cidade = "SAO PAULO"
 
@@ -547,13 +559,15 @@ class ServicoPadronizacao:
         if inst_sub:
             cidade, subproduto = inst_sub
 
-            # regra: INST PREV => prefeitura (se conseguir mapear cidade->UF)
+            # normaliza para bater com o índice/caches (ASCII/UPPER)
+            cidade = ascii_upper(cidade)
+            subproduto = ascii_upper(subproduto)
+
             if cidade in {"SP"}:
                 cidade = "SAO PAULO"
 
             uf = self.indice.uf_prefeitura(cidade)
 
-            # tenta inferir UF por estado no texto/convênio
             if not uf:
                 uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
 
@@ -567,7 +581,6 @@ class ServicoPadronizacao:
                     "grupo_convenio": "PREFEITURAS",
                 }
 
-            # se não conseguir UF, ainda devolve produto certo, mas MANUAL/MANUAL (não vazio!)
             produto = self._montar_produto(f"INST PREV {cidade}", subproduto, taxa, beneficio)
             return {
                 "produto_padronizado": produto,
@@ -582,6 +595,8 @@ class ServicoPadronizacao:
         if "INST PREV" in texto:
             cidade = extrair_inst_prev_gen(texto)
             if cidade:
+                cidade = ascii_upper(cidade)
+
                 if cidade in {"SP"}:
                     cidade = "SAO PAULO"
 

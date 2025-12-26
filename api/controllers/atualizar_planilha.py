@@ -41,8 +41,7 @@ def processar_atualizacao(
     log_info("Iniciando atualização de condições")
     log_info(f"Banco selecionado: {banco}")
 
-    # 0) (LEGADO) validação humana — você disse que não vai usar agora,
-    # mas mantemos compatibilidade sem obrigar.
+    # 0) (LEGADO) validação humana
     if caminho_validacao and caminho_validacao.exists():
         log_info(f"Aplicando validação humana: {caminho_validacao}")
         promover_padroes(caminho_validacao)
@@ -107,18 +106,46 @@ def processar_atualizacao(
     for acao in acoes:
         if acao.tipo == TipoAcao.ABRIR and acao.item_banco:
             linhas_saida.append(linha_abrir(acao.item_banco))
+
         elif acao.tipo == TipoAcao.FECHAR and acao.item_interno:
             linhas_saida.append(linha_fechar(acao.item_interno))
+
         elif (
             acao.tipo == TipoAcao.FECHAR_ABRIR
             and acao.item_interno
             and acao.item_banco
         ):
-            # regra importante: FECHAR antes de ABRIR
+            # REGRA DE OURO: FECHAR ANTES DE ABRIR
             linhas_saida.append(linha_fechar(acao.item_interno))
             linhas_saida.append(linha_abrir(acao.item_banco))
 
     log_info(f"→ {len(linhas_saida)} linhas geradas no Excel final")
+
+    # 6.5) ordenação final
+    def _chave_ordenacao(linha: Dict[str, Any]):
+        termino = (linha.get("Término") or "").strip()
+
+        # 0 = FECHAR, 1 = ABRIR
+        ordem_acao = 0 if termino else 1
+
+        convenio = (linha.get("Convênio") or "").strip().upper()
+        familia = (linha.get("Família Produto") or "").strip().upper()
+        produto = (linha.get("Produto") or "").strip().upper()
+        operacao = (linha.get("Operação") or "").strip().upper()
+
+        # convênios vazios (manual) vão pro fim
+        convenio_vazio = 1 if not convenio else 0
+
+        return (
+            ordem_acao,      # 🔴 FECHAR SEMPRE PRIMEIRO
+            convenio_vazio,
+            convenio,
+            familia,
+            produto,
+            operacao,
+        )
+
+    linhas_saida = sorted(linhas_saida, key=_chave_ordenacao)
 
     # 7) escrever Excel
     log_info("Gerando planilha final.")
@@ -130,7 +157,7 @@ def processar_atualizacao(
     if gravadas:
         log_info(f"{gravadas} sugestões gravadas no CSV de validação")
 
-    # retorno pra API (sem depender de prints)
+    # retorno pra API
     cache_final = servico_padronizacao.cache.tamanho
     metricas = dict(servico_padronizacao.metricas)
 
@@ -149,5 +176,5 @@ def processar_atualizacao(
             "novas": novas_chaves_cache,
             "final": cache_final,
         },
-        "padronizacao": metricas,  # consultas_cache, hits_cache, chamadas_ia, linhas_csv
+        "padronizacao": metricas,
     }
