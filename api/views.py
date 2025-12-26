@@ -1,95 +1,92 @@
-# api/views.py
-
 from pathlib import Path
+import uuid
+
 from django.conf import settings
-from django.http import JsonResponse, HttpRequest
+from django.http import JsonResponse, HttpRequest, FileResponse, Http404
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
-from .controllers.atualizar_planilha import processar_atualizacao
-from .controllers.promover_padroes import promover_padroes
+from api.controllers.atualizar_planilha import processar_atualizacao
 
 
-class AtualizarPlanilhaView(View):
+@method_decorator(csrf_exempt, name="dispatch")
+class ExecucaoAtualizacaoView(View):
     """
-    POST /api/atualizar/
-
-    Campos esperados:
-    - banco (ex: "HOPE")
-    - arquivo_banco (file)
-    - arquivo_interno (file)
+    POST /api/execucoes/atualizacao
     """
 
     def post(self, request: HttpRequest):
-        banco = request.POST.get("banco", "HOPE")
+        banco = request.POST.get("banco")
         arquivo_banco = request.FILES.get("arquivo_banco")
         arquivo_interno = request.FILES.get("arquivo_interno")
 
-        if not arquivo_banco or not arquivo_interno:
+        if not banco or not arquivo_banco or not arquivo_interno:
             return JsonResponse(
-                {"erro": "Parâmetros obrigatórios: arquivo_banco e arquivo_interno."},
+                {"erro": "Campos obrigatórios: banco, arquivo_banco, arquivo_interno"},
                 status=400,
             )
 
-        # Diretório onde vamos salvar a saída
-        saidas_dir = Path(settings.MEDIA_ROOT) / "saidas"
-        saidas_dir.mkdir(parents=True, exist_ok=True)
+        exec_id = uuid.uuid4().hex
+        exec_dir = Path(settings.MEDIA_ROOT) / "execucoes" / exec_id
+        exec_dir.mkdir(parents=True, exist_ok=True)
 
-        caminho_banco = saidas_dir / "tmp_banco.xlsx"
-        caminho_interno = saidas_dir / "tmp_interno.xlsx"
-        caminho_saida = saidas_dir / "saida_atualizada.xlsx"
+        caminho_banco = exec_dir / "banco.xlsx"
+        caminho_interno = exec_dir / "interno.xlsx"
+        caminho_saida = exec_dir / "delta.xlsx"
 
-        # Salvar uploads em disco
-        with caminho_banco.open("wb") as f:
-            for chunk in arquivo_banco.chunks():
-                f.write(chunk)
+        for file, path in [
+            (arquivo_banco, caminho_banco),
+            (arquivo_interno, caminho_interno),
+        ]:
+            with path.open("wb") as f:
+                for chunk in file.chunks():
+                    f.write(chunk)
 
-        with caminho_interno.open("wb") as f:
-            for chunk in arquivo_interno.chunks():
-                f.write(chunk)
-
-        # Processar atualização
         try:
-            processar_atualizacao(banco, caminho_banco, caminho_interno, caminho_saida)
+            resultado = processar_atualizacao(
+                banco=banco,
+                caminho_banco=caminho_banco,
+                caminho_interno=caminho_interno,
+                caminho_saida=caminho_saida,
+            )
         except Exception as e:
-            return JsonResponse({"erro": str(e)}, status=500)
-
-        # Para integração futura com Next.js, retornamos o caminho relativo
-        caminho_relativo = f"{settings.MEDIA_URL}saidas/saida_atualizada.xlsx"
+            return JsonResponse(
+                {"status": "error", "erro": str(e)},
+                status=500,
+            )
 
         return JsonResponse(
             {
-                "mensagem": "Processamento concluído com sucesso.",
-                "arquivo_saida": caminho_relativo,
+                "status": "success",
+                "execucao_id": exec_id,
+                "download_url": f"http://localhost:8000/api/execucoes/{exec_id}/download",
+                "resumo": {
+                    "linhas_banco": resultado["linhas_banco"],
+                    "linhas_interno": resultado["linhas_interno"],
+                    "linhas_saida": resultado["linhas_saida"],
+                },
+                "acoes": resultado["acoes"],
+                "cache": resultado["cache"],
+                "padronizacao": resultado["padronizacao"],
             }
         )
 
 
-class PromoverPadroesView(View):
+class DownloadDeltaView(View):
     """
-    POST /api/promover/
-
-    Campos esperados:
-    - arquivo_corrigido (file CSV com colunas aprovado/corrigido_para)
+    GET /api/execucoes/<execucao_id>/download
+    Força download da planilha DELTA
     """
 
-    def post(self, request: HttpRequest):
-        arquivo_corrigido = request.FILES.get("arquivo_corrigido")
+    def get(self, request: HttpRequest, execucao_id: str):
+        caminho = Path(settings.MEDIA_ROOT) / "execucoes" / execucao_id / "delta.xlsx"
 
-        if not arquivo_corrigido:
-            return JsonResponse({"erro": "arquivo_corrigido é obrigatório."}, status=400)
+        if not caminho.exists():
+            raise Http404("Arquivo não encontrado")
 
-        tmp_dir = Path(settings.MEDIA_ROOT) / "promocoes"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        caminho_corrigido = tmp_dir / "sugestoes_corrigidas.csv"
-
-        with caminho_corrigido.open("wb") as f:
-            for chunk in arquivo_corrigido.chunks():
-                f.write(chunk)
-
-        try:
-            promover_padroes(caminho_corrigido)
-        except Exception as e:
-            return JsonResponse({"erro": str(e)}, status=500)
-
-        return JsonResponse({"mensagem": "Padrões promovidos com sucesso."})
+        return FileResponse(
+            open(caminho, "rb"),
+            as_attachment=True,
+            filename="planilha_atualizacao.xlsx",
+        )
