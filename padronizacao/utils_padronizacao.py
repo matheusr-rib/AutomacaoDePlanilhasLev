@@ -326,16 +326,21 @@ def extrair_sigla_e_cidade(texto: str) -> Optional[Tuple[str, str]]:
     return sigla, cidade
 
 
-def extrair_inst_prev_sub(texto: str) -> Optional[Tuple[str, str]]:
+def extrair_inst_prev_sub(texto: str):
     """
-    INST PREV FORMIGA - PREVIFOR - 2.15%
+    Extrai cidade + subinstituto em casos como:
+    INST PREV FORMIGA - PREVIFOR - 2,25%
     """
-    t = ascii_upper(texto)
-    m = _RE_INST_PREV_SUB.search(t)
+    m = re.search(
+        r"INST\s+PREV\s+([A-Z\s]+?)\s*-\s*([A-Z0-9]+)\s*-",
+        texto
+    )
     if not m:
         return None
-    cidade = normalizar_cidade_prefeitura(m.group(1).strip())
-    sub = ascii_upper(m.group(2).strip())
+
+    cidade = m.group(1).strip()
+    sub = m.group(2).strip()
+
     return cidade, sub
 
 
