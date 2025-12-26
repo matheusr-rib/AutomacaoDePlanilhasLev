@@ -1,9 +1,15 @@
-# api/urls.py
-
 from django.urls import path
-from .views import AtualizarPlanilhaView, PromoverPadroesView
+from api.views import ExecucaoAtualizacaoView, DownloadDeltaView
 
 urlpatterns = [
-    path("atualizar/", AtualizarPlanilhaView.as_view(), name="api-atualizar"),
-    path("promover/", PromoverPadroesView.as_view(), name="api-promover"),
+    path(
+        "execucoes/atualizacao",
+        ExecucaoAtualizacaoView.as_view(),
+        name="execucao-atualizacao",
+    ),
+    path(
+        "execucoes/<str:execucao_id>/download",
+        DownloadDeltaView.as_view(),
+        name="execucao-download",
+    ),
 ]
