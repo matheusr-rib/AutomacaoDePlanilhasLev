@@ -364,12 +364,6 @@ class ServicoPadronizacao:
         if cidade_sub:
             cidade = ascii_upper(cidade_sub)
 
-            if subproduto:
-                subproduto = ascii_upper(subproduto)
-                cidade_catalogo = cidade_por_inst_prev(subproduto)
-                if cidade_catalogo:
-                    cidade = cidade_catalogo
-
             uf = (
                 self.indice.uf_prefeitura(cidade)
                 or uf_por_cidade_fallback(cidade)
@@ -379,23 +373,37 @@ class ServicoPadronizacao:
                 or _extrair_uf_por_estado_no_texto(conv)
             )
 
-            if uf:
-                produto = self._montar_produto(f"PREF. {cidade}", subproduto, taxa, beneficio)
-                return {
-                    "produto_padronizado": produto,
-                    "convenio_padronizado": f"PREF. {cidade} {uf}",
-                    "familia_produto": "PREFEITURAS",
-                    "grupo_convenio": "PREFEITURAS",
-                }
+            # COM SIGLA DO INSTITUTO → PRODUTO COMEÇA COM PREF.
+            if subproduto:
+                produto = self._montar_produto(
+                    f"PREF. {cidade}",
+                    ascii_upper(subproduto),
+                    taxa,
+                    beneficio
+                )
+            else:
+                # SEM SIGLA → INST PREV <CIDADE>
+                produto = self._montar_produto(
+                    f"INST PREV {cidade}",
+                    "",
+                    taxa,
+                    beneficio
+                )
 
-            produto = self._montar_produto(f"INST PREV {cidade}", subproduto, taxa, beneficio)
+            convenio_pad = (
+                f"PREF. {cidade} {uf}"
+                if uf
+                else self.indice.alias_convenio.get(f"PREF. {cidade}", f"PREF. {cidade}")
+            )
+
             return {
                 "produto_padronizado": produto,
-                "convenio_padronizado": "",
-                "familia_produto": "MANUAL",
-                "grupo_convenio": "MANUAL",
+                "convenio_padronizado": convenio_pad,
+                "familia_produto": "PREFEITURAS",
+                "grupo_convenio": "PREFEITURAS",
             }
 
+        # fallback genérico (INST PREV sem sigla)
         cidade_gen = extrair_inst_prev_gen(texto) or extrair_inst_prev_gen(conv)
         if cidade_gen:
             cidade = ascii_upper(cidade_gen)
@@ -409,21 +417,24 @@ class ServicoPadronizacao:
                 or _extrair_uf_por_estado_no_texto(conv)
             )
 
-            produto = self._montar_produto(f"INST PREV {cidade}", "", taxa, beneficio)
+            produto = self._montar_produto(
+                f"INST PREV {cidade}",
+                "",
+                taxa,
+                beneficio
+            )
 
-            if uf:
-                return {
-                    "produto_padronizado": produto,
-                    "convenio_padronizado": f"PREF. {cidade} {uf}",
-                    "familia_produto": "PREFEITURAS",
-                    "grupo_convenio": "PREFEITURAS",
-                }
+            convenio_pad = (
+                f"PREF. {cidade} {uf}"
+                if uf
+                else self.indice.alias_convenio.get(f"PREF. {cidade}", f"PREF. {cidade}")
+            )
 
             return {
                 "produto_padronizado": produto,
-                "convenio_padronizado": "",
-                "familia_produto": "MANUAL",
-                "grupo_convenio": "MANUAL",
+                "convenio_padronizado": convenio_pad,
+                "familia_produto": "PREFEITURAS",
+                "grupo_convenio": "PREFEITURAS",
             }
 
         # ==================================================

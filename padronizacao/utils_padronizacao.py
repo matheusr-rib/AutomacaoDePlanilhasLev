@@ -330,42 +330,52 @@ def extrair_sigla_e_cidade(texto: str) -> Optional[Tuple[str, str]]:
 
 def extrair_inst_prev_sub(texto: str) -> tuple[str, str]:
     """
-    Extrai INST PREV com subproduto:
-      "EMPRÉSTIMO - INST PREV VITÓRIA - IPAMV - 2.14%"
-        -> ("VITORIA", "IPAMV")
-
-    Normaliza tudo em ASCII/UPPER pra não morrer em acentos.
+    Extrai cidade e nome do instituto previdenciário quando existir:
+    Ex:
+      INST PREV FORMIGA - PREVIFOR
+      INST PREV VITÓRIA - IPAMV
     """
-    if not texto:
-        return "", ""
+    import re
 
     t = ascii_upper(texto)
-    m = _RE_INST_PREV_SUB.search(t)
+
+    m = re.search(
+        r"INST\s+PREV\s+([A-ZÀ-Ü\s]+?)(?:\s*-\s*([A-Z0-9À-Ü]+))?(?:\s*-|\s*\d|$)",
+        t
+    )
+
     if not m:
         return "", ""
 
-    cidade = " ".join((m.group(1) or "").split()).strip()
-    subproduto = (m.group(2) or "").strip()
+    cidade = " ".join(m.group(1).split()).strip()
+    cidade = normalizar_cidade_prefeitura(cidade)
 
-    return cidade, subproduto
+    instituto = (m.group(2) or "").strip()
+
+    return cidade, instituto
 
 
 
 def extrair_inst_prev_gen(texto: str) -> str:
     """
-    Extrai INST PREV sem subproduto:
-      "EMPRÉSTIMO - INST PREV ITANHAEM - 1.99%"
-        -> "ITANHAEM"
+    Extrai somente a cidade quando vier:
+      INST PREV ITANHAEM - 1.99%
     """
-    if not texto:
-        return ""
+    import re
 
     t = ascii_upper(texto)
-    m = re.search(r"(?:^|\b)INST\s+PREV\s+([A-Z\s]{2,})\b", t)
+
+    m = re.search(
+        r"INST\s+PREV\s+([A-ZÀ-Ü\s]+?)(?:\s*-|\s*\d|$)",
+        t
+    )
+
     if not m:
         return ""
 
-    cidade = " ".join((m.group(1) or "").split()).strip()
+    cidade = " ".join(m.group(1).split()).strip()
+    cidade = normalizar_cidade_prefeitura(cidade)
+
     return cidade
 
 
