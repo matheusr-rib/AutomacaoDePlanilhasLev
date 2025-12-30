@@ -266,36 +266,66 @@ class ServicoPadronizacao:
         chave = self._gerar_chave_manual(entrada)
         self.metricas["consultas_cache"] += 1
 
+        # =========================
+        # 1) CACHE DE EXECUÇÃO
+        # =========================
         if chave in self._cache_execucao:
             self.metricas["hits_cache"] += 1
-            return self._cache_execucao[chave], 0.99
+            achado = dict(self._cache_execucao[chave])
+            achado.setdefault("__ORIGEM_PADRONIZACAO", "CACHE")
+            return achado, 0.99
 
+        # =========================
+        # 2) CACHE PERSISTIDO (JSON)
+        # =========================
         achado = self.cache.get(chave)
         if achado is not None:
             self.metricas["hits_cache"] += 1
             achado = dict(achado)
+
             if achado.get("produto_padronizado"):
-                achado["produto_padronizado"] = _limpar_produto_final(achado["produto_padronizado"])
+                achado["produto_padronizado"] = _limpar_produto_final(
+                    achado["produto_padronizado"]
+                )
+
             achado = _garantir_familia_grupo(achado)
+            achado["__ORIGEM_PADRONIZACAO"] = "CACHE"
+
+            self._cache_execucao[chave] = achado
             return achado, 1.0
 
+        # =========================
+        # 3) REGRAS DETERMINÍSTICAS
+        # =========================
         padrao = self._padronizar_por_regra(entrada)
         if padrao is not None:
             padrao = dict(padrao)
+
             if padrao.get("produto_padronizado"):
-                padrao["produto_padronizado"] = _limpar_produto_final(padrao["produto_padronizado"])
+                padrao["produto_padronizado"] = _limpar_produto_final(
+                    padrao["produto_padronizado"]
+                )
+
             padrao = _garantir_familia_grupo(padrao)
+            padrao["__ORIGEM_PADRONIZACAO"] = "REGRA"
 
             self._cache_execucao[chave] = padrao
             return padrao, 0.98
 
+        # =========================
+        # 4) IA (FALLBACK FINAL)
+        # =========================
         self.metricas["chamadas_ia"] += 1
         sugestao, confianca = self.ia.sugerir_padrao(entrada)
 
         sugestao = dict(sugestao)
         if sugestao.get("produto_padronizado"):
-            sugestao["produto_padronizado"] = _limpar_produto_final(sugestao["produto_padronizado"])
+            sugestao["produto_padronizado"] = _limpar_produto_final(
+                sugestao["produto_padronizado"]
+            )
+
         sugestao = _garantir_familia_grupo(sugestao)
+        sugestao["__ORIGEM_PADRONIZACAO"] = "IA"
 
         self._cache_execucao[chave] = sugestao
 

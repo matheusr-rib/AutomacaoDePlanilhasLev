@@ -108,6 +108,7 @@ def linha_fechar(item: CanonicalItem) -> Dict[str, Any]:
 
     base["Término"] = ontem
 
+    
     return base
 
 
@@ -169,5 +170,8 @@ def linha_abrir(item: CanonicalItem) -> Dict[str, Any]:
     # Colunas extras HOPE (mantém contrato de sempre)
     for col in COLUNAS_EXTRAS_HOPE:
         base[col] = ""
+
+    # carimbo interno (não vai pra planilha, serve só pro writer pintar)
+    base["__ORIGEM_PADRONIZACAO"] = item.extras.get("__ORIGEM_PADRONIZACAO", "")
 
     return base

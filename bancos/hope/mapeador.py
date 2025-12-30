@@ -54,6 +54,9 @@ def mapear_banco_para_itens(
             "Família Produto": familia,
             "Grupo Convênio": grupo,
             "Complemento": complemento,
+
+            # carimbo interno (NÃO vira coluna do Excel)
+            "__ORIGEM_PADRONIZACAO": padrao.get("__ORIGEM_PADRONIZACAO", ""),
         }
 
         item = CanonicalItem(
