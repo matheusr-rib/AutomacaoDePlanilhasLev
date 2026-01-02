@@ -368,7 +368,7 @@ class ServicoPadronizacao:
             return None
 
         beneficio = tem_beneficio(texto) or tem_beneficio(conv) or ("CARTAO BENEFICIO" in texto)
-        taxa = format_taxa_br(entrada.get("taxa_raw") or extrair_taxa_fim(texto))
+        taxa = format_taxa_br(extrair_taxa_fim(texto))
 
         # ==================================================
         # AMAZONPREV — regra direta (prefeitura de Manaus)
