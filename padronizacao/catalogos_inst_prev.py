@@ -14,6 +14,8 @@ Regra de ouro:
 
 from __future__ import annotations
 
+from pathlib import Path
+import json
 from .utils_padronizacao import ascii_upper
 
 
@@ -122,99 +124,20 @@ INST_PREV_PARA_CIDADE = {
 
 
 # ==========================================================
-# CIDADE -> UF (fallback determinístico)
+# CIDADE -> UF (fallback via JSON)
 # ==========================================================
-# Usado quando:
-# - O IndiceCache ainda não aprendeu
-# - O texto não traz UF explícito
-#
-# Só cidades com 100% de certeza
+# Fonte: city_to_uf.json (todas as cidades brasileiras)
 # ==========================================================
-CIDADE_PARA_UF_FALLBACK = {
-    # SP
-    "SAO PAULO": "SP",
-    "CAMPINAS": "SP",
-    "JUNDIAI": "SP",
-    "ARARAQUARA": "SP",
-    "BARUERI": "SP",
-    "JABOTICABAL": "SP",
-    "ITAPEVI": "SP",
-    "ITATIBA": "SP",
-    "TAUBATE": "SP",
-    "MAUA": "SP",
-    "EMBU DAS ARTES": "SP",
-    "MOGI DAS CRUZES": "SP",
-    "MOGI MIRIM": "SP",
-    "PIRACICABA": "SP",
-    "JACAREI": "SP",
-    "ITANHAEM": "SP",
-    "SANTO ANDRE": "SP",
 
-    # MG
-    "BELO HORIZONTE": "MG",
-    "FORMIGA": "MG",
-    "CONTAGEM": "MG",
-    "UBERLANDIA": "MG",
-    "JUIZ DE FORA": "MG",
-    "OURO PRETO": "MG",
-    "VARGINHA": "MG",
-    "POCOS DE CALDAS": "MG",
-    "PATOS DE MINAS": "MG",
+_BASE_DIR = Path(__file__).parent
+_CIDADES_JSON = _BASE_DIR / "city_to_uf.json"
 
-    # ES
-    "VITORIA": "ES",
-    "VILA VELHA": "ES",
-    "SERRA": "ES",
-    "CARIACICA": "ES",
-
-    # PR
-    "CURITIBA": "PR",
-    "GUARAPUAVA": "PR",
-    "LONDRINA": "PR",
-    "MARINGA": "PR",
-    "FOZ DO IGUACU": "PR",
-    "PONTA GROSSA": "PR",
-
-    # RJ
-    "RIO DE JANEIRO": "RJ",
-    "NITEROI": "RJ",
-    "QUEIMADOS": "RJ",
-
-    # AM
-    "MANAUS": "AM",
-
-    # RS
-    "PORTO ALEGRE": "RS",
-    "CAXIAS DO SUL": "RS",
-    "NOVO HAMBURGO": "RS",
-    "SANTA MARIA": "RS",
-
-    # SC
-    "FLORIANOPOLIS": "SC",
-    "BLUMENAU": "SC",
-    "JARAGUA DO SUL": "SC",
-    "ITAJAI": "SC",
-    "CRICIUMA": "SC",
-
-    # BA
-    "SALVADOR": "BA",
-    "VITORIA DA CONQUISTA": "BA",
-    "JUAZEIRO": "BA",
-
-    # CE
-    "FORTALEZA": "CE",
-    "JUAZEIRO DO NORTE": "CE",
-    "SOBRAL": "CE",
-
-    # PE
-    "RECIFE": "PE",
-    "OLINDA": "PE",
-    "JABOATAO DOS GUARARAPES": "PE",
-
-    # GO
-    "GOIANIA": "GO",
-    "ANAPOLIS": "GO",
-}
+try:
+    with open(_CIDADES_JSON, encoding="utf-8") as f:
+        _CIDADE_PARA_UF_FALLBACK = json.load(f)
+except Exception:
+    # Falha controlada: sistema continua rodando
+    _CIDADE_PARA_UF_FALLBACK = {}
 
 
 # ==========================================================
@@ -231,8 +154,8 @@ def cidade_por_inst_prev(subproduto: str) -> str:
 
 def uf_por_cidade_fallback(cidade: str) -> str:
     """
-    Retorna UF baseada na cidade (fallback determinístico).
+    Retorna UF baseada na cidade (fallback determinístico via JSON).
     """
     if not cidade:
         return ""
-    return CIDADE_PARA_UF_FALLBACK.get(ascii_upper(cidade), "")
+    return _CIDADE_PARA_UF_FALLBACK.get(ascii_upper(cidade), "")

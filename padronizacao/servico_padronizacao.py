@@ -99,6 +99,24 @@ _RE_PROIBIDAS = re.compile(
     ) + r")\b"
 )
 
+def _convenio_tem_uf(convenio: str) -> bool:
+    """
+    Retorna True se o convênio contém UF válida no final.
+    Exemplos válidos:
+      - PREF. SAO PAULO SP
+      - GOV-SP
+      - TJ | MG
+    """
+    if not convenio:
+        return False
+
+    t = ascii_upper(convenio)
+
+    return bool(
+        re.search(r"\b[A-Z]{2}$", t) or          # PREF. X XX
+        re.search(r"\bGOV-[A-Z]{2}$", t) or      # GOV-SP
+        re.search(r"\|\s*[A-Z]{2}$", t)          # TJ | SP
+    )
 
 def _limpar_produto_final(produto: str) -> str:
     """
@@ -290,6 +308,9 @@ class ServicoPadronizacao:
 
             achado = _garantir_familia_grupo(achado)
             achado["__ORIGEM_PADRONIZACAO"] = "CACHE"
+            
+            if not _convenio_tem_uf(achado.get("convenio_padronizado", "")):
+                achado["__ORIGEM_PADRONIZACAO"] = "MANUAL"
 
             self._cache_execucao[chave] = achado
             return achado, 1.0
@@ -308,6 +329,9 @@ class ServicoPadronizacao:
 
             padrao = _garantir_familia_grupo(padrao)
             padrao["__ORIGEM_PADRONIZACAO"] = "REGRA"
+
+            if not _convenio_tem_uf(padrao.get("convenio_padronizado", "")):
+                padrao["__ORIGEM_PADRONIZACAO"] = "MANUAL"
 
             self._cache_execucao[chave] = padrao
             return padrao, 0.98
@@ -500,7 +524,7 @@ class ServicoPadronizacao:
         # ==================================================
         if "SIAPE" in texto or "SIAPE" in conv:
             return {
-                "produto_padronizado": f"SIAPE - {taxa}",
+                "produto_padronizado": self._montar_produto("SIAPE", "", taxa, beneficio),
                 "convenio_padronizado": "FEDERAL SIAPE",
                 "familia_produto": "FEDERAIS",
                 "grupo_convenio": "FEDERAL",
@@ -511,7 +535,7 @@ class ServicoPadronizacao:
         # ==================================================
         if "USP" in texto:
             return {
-                "produto_padronizado": f"USP - {taxa}",
+                "produto_padronizado": self._montar_produto("USP", "", taxa, beneficio),
                 "convenio_padronizado": "GOV-SP",
                 "familia_produto": "GOVERNOS",
                 "grupo_convenio": "ESTADUAL",
@@ -519,7 +543,7 @@ class ServicoPadronizacao:
 
         if "UNICAMP" in texto:
             return {
-                "produto_padronizado": f"UNICAMP - {taxa}",
+                "produto_padronizado": self._montar_produto("UNICAMP", "", taxa, beneficio),
                 "convenio_padronizado": "GOV-SP",
                 "familia_produto": "GOVERNOS",
                 "grupo_convenio": "ESTADUAL",
@@ -536,7 +560,7 @@ class ServicoPadronizacao:
                 if estado:
                     uf = ESTADO_PARA_UF.get(estado, "")
             if uf:
-                produto = f"TJ - {uf} - {taxa}"
+                produto = self._montar_produto(f"TJ - {uf}", "", taxa, beneficio)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": f"TJ | {uf}",

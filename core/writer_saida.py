@@ -33,7 +33,8 @@ def escrever_excel(linhas: List[Dict[str, Any]], colunas: List[str], caminho_sai
 
         # header é linha 1, dados começam na linha 2
         for i, linha in enumerate(linhas, start=2):
-            if (linha.get("__ORIGEM_PADRONIZACAO") or "").upper() == "IA":
+            origem = (linha.get("__ORIGEM_PADRONIZACAO") or "").upper()
+            if origem in {"IA", "MANUAL"}:
                 for col in range(1, len(colunas) + 1):
                     ws.cell(row=i, column=col).fill = fill_vermelho
 
