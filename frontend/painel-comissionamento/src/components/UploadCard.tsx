@@ -19,7 +19,10 @@ export function UploadCard({
   const [dragOver, setDragOver] = useState(false)
 
   function openPicker() {
-    inputRef.current?.click()
+    if (inputRef.current) {
+      inputRef.current.value = "" // 🔑 limpa o valor antigo
+      inputRef.current.click()
+    }
   }
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -27,11 +30,23 @@ export function UploadCard({
     onFileChange(f)
   }
 
+  function removeFile() {
+    onFileChange(null)
+    if (inputRef.current) {
+      inputRef.current.value = "" // 🔑 limpa o input
+    }
+  }
+
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault()
     setDragOver(false)
+
     const f = e.dataTransfer.files?.[0] || null
-    if (f) onFileChange(f)
+    if (f) {
+      // (opcional mas recomendado) limpa antes pra permitir trocar pelo mesmo arquivo via drag-drop
+      if (inputRef.current) inputRef.current.value = ""
+      onFileChange(f)
+    }
   }
 
   return (
@@ -66,7 +81,8 @@ export function UploadCard({
       <div className="mt-4 rounded-lg border border-dashed border-zinc-800 p-4">
         {!file ? (
           <p className="text-zinc-400 text-sm">
-            Arraste o arquivo aqui ou clique em <span className="text-white">Selecionar</span>.
+            Arraste o arquivo aqui ou clique em{" "}
+            <span className="text-white">Selecionar</span>.
           </p>
         ) : (
           <div className="flex items-center justify-between gap-3">
@@ -76,9 +92,10 @@ export function UploadCard({
                 {(file.size / 1024 / 1024).toFixed(2)} MB
               </p>
             </div>
+
             <button
               type="button"
-              onClick={() => onFileChange(null)}
+              onClick={removeFile}
               className="text-xs px-3 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 transition-colors"
             >
               Remover
