@@ -388,11 +388,27 @@ class ServicoPadronizacao:
         texto = ascii_upper(texto_raw)
         conv = ascii_upper(convenio_raw)
 
+        eh_combo = (
+            "COMBO" in texto
+        )
+
         if not texto and not conv:
             return None
 
         beneficio = tem_beneficio(texto) or tem_beneficio(conv) or ("CARTAO BENEFICIO" in texto)
-        taxa = format_taxa_br(extrair_taxa_fim(texto))
+
+        if eh_combo:
+                taxa = (
+                    extrair_taxa_refin(texto)          
+                    or extrair_taxa_fim(texto)
+                    or format_taxa_br(entrada.get("taxa_raw"))
+                )
+        else:
+                    taxa = format_taxa_br(
+                        extrair_taxa_fim(texto)
+                        or entrada.get("taxa_raw")
+                    )
+
 
         # ==================================================
         # AMAZONPREV — regra direta (prefeitura de Manaus)
@@ -571,34 +587,47 @@ class ServicoPadronizacao:
         # ==================================================
         # 5) COMBO/PORT com GOV (NUNCA deixar PORT aparecer no produto)
         # ==================================================
-        if "GOV" in texto and ("COMBO" in texto or "PORT" in texto or "REFIN" in texto):
-            uf = extrair_gov_uf(texto) or extrair_gov_uf(conv)
-            if not uf:
-                uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
-            if not uf:
-                return None
+        if eh_combo:
 
-            taxa_refin = extrair_taxa_refin(texto) or taxa
+    # tenta extrair UF de qualquer forma válida
+            uf = (
+                extrair_gov_uf(texto)
+                or extrair_gov_uf(conv)
+                or _extrair_uf_por_estado_no_texto(texto)
+                or _extrair_uf_por_estado_no_texto(conv)
+            )
+
+            # se ainda não tiver UF, deixa a regra seguir para PREF / INST PREV
+            # (não retorna None aqui)
             derivado = ""
-            if "COMBO" in texto:
-                derivado = extrair_derivado_gov_combo(texto, uf) or ""
-            else:
-                m = re.search(rf"\bGOV[.\s-]*{uf}\b\s*-\s*(.+?)\s*-\s*\d", texto)
-                if m:
-                    derivado = m.group(1).strip()
 
-            if derivado and _RE_PROIBIDAS.search(derivado):
-                derivado = ""
+            if uf:
+                if "COMBO" in texto:
+                    derivado = extrair_derivado_gov_combo(texto, uf) or ""
+                else:
+                    m = re.search(rf"\b{uf}\b\s*-\s*(.+?)\s*-\s*\d", texto)
+                    if m:
+                        derivado = m.group(1).strip()
 
-            convenio = self.indice.alias_convenio.get(f"GOV {uf}", f"GOV-{uf}")
-            produto = self._montar_produto(f"GOV. {uf}", derivado, taxa_refin, beneficio)
+                if derivado and _RE_PROIBIDAS.search(derivado):
+                    derivado = ""
 
-            return {
-                "produto_padronizado": produto,
-                "convenio_padronizado": convenio,
-                "familia_produto": "GOVERNOS",
-                "grupo_convenio": "ESTADUAL",
-            }
+                convenio = self.indice.alias_convenio.get(f"GOV {uf}", f"GOV-{uf}")
+
+                produto = self._montar_produto(
+                    f"GOV. {uf}",
+                    derivado,
+                    taxa,       # ← taxa já correta
+                    beneficio
+                )
+
+                return {
+                    "produto_padronizado": produto,
+                    "convenio_padronizado": convenio,
+                    "familia_produto": "GOVERNOS",
+                    "grupo_convenio": "ESTADUAL",
+                }
+
 
         # ==================================================
         # 6) GOV simples (sem combo/port)
