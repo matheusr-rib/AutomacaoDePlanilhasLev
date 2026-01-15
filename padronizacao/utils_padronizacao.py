@@ -68,6 +68,10 @@ def tem_beneficio(texto: str) -> bool:
     return "BENEFICIO" in ascii_upper(texto)
 
 
+def tem_seguro(texto: str) -> bool:
+    return "SEGURO" in ascii_upper(texto)
+
+
 # =====================================================
 # ESTADO -> UF (TRIBUNAIS / AJUDAS)
 # =====================================================

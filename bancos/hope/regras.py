@@ -5,6 +5,9 @@ from typing import Dict, Any, Tuple
 
 from core.modelos import CanonicalItem
 from bancos.hope.colunas_extras import COLUNAS_EXTRAS_HOPE
+from decimal import Decimal, ROUND_HALF_UP
+
+
 
 
 COLUNAS_COMUNS = [
@@ -52,6 +55,16 @@ def _fmt_pct(valor: float) -> str:
     return f"{valor:.2f}".replace(".", ",")
 
 
+def arredondar_005_mais_perto(valor: float) -> float:
+    d = Decimal(str(valor))
+    passo = Decimal("0.05")
+
+    # divide pelo passo, arredonda para o inteiro mais próximo
+    q = (d / passo).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    # volta para o valor final com 2 casas
+    return float((q * passo).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP))
+
 def calcular_faixas_comissao(operacao: str, comissao_base: float) -> Tuple[str, str, str]:
     """
     Implementa as 3 fórmulas do Excel:
@@ -72,7 +85,7 @@ def calcular_faixas_comissao(operacao: str, comissao_base: float) -> Tuple[str, 
     op = operacao.strip().upper()
 
     # mínima sempre 0,7
-    minima = round(base * 0.7, 2)
+    minima = arredondar_005_mais_perto(base * 0.7)
 
     if op in {"NOVO", "CARTÃO", "SAQUE COMPL."}:
         intermediaria = round(base * 0.95, 2)

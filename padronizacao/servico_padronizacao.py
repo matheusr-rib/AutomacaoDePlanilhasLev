@@ -23,6 +23,7 @@ from .utils_padronizacao import (
     extrair_inst_prev_gen,
     extrair_tj_uf,
     extrair_tj_estado,
+    tem_seguro
 )
 from .indice_cache import IndiceCache
 
@@ -363,11 +364,12 @@ class ServicoPadronizacao:
     # ======================================================
     # HELPERS DE MONTAGEM
     # ======================================================
-    def _montar_produto(self, prefixo: str, meio: str, taxa: str, beneficio: bool) -> str:
+    def _montar_produto(self, prefixo: str, meio: str, taxa: str, beneficio: bool, seguro: bool) -> str:
         """
         prefixo: 'PREF. COTIA' / 'GOV. SP' / 'TJ - MG' / 'INST PREV GUARAPUAVA'
         meio: 'SEPREM' / 'SEC EDUCACAO' / 'HSPM' / ''
         beneficio insere: ' - BENEFICIO' antes da taxa
+        seguro insere: ' - C/SEGURO' no final (após a taxa)
         """
         base = prefixo.strip()
 
@@ -375,8 +377,14 @@ class ServicoPadronizacao:
             base = f"{base} - {meio.strip()}"
 
         if beneficio:
-            return f"{base} - BENEFICIO - {taxa}"
-        return f"{base} - {taxa}"
+            base = f"{base} - BENEFICIO - {taxa}"
+        else:
+            base = f"{base} - {taxa}"
+
+        if seguro:
+            base = f"{base} - C/SEGURO"
+
+        return base
 
     # ======================================================
     # REGRAS DETERMINÍSTICAS (ORDEM IMPORTA)
@@ -396,10 +404,11 @@ class ServicoPadronizacao:
             return None
 
         beneficio = tem_beneficio(texto) or tem_beneficio(conv) or ("CARTAO BENEFICIO" in texto)
+        seguro = tem_seguro(texto) or ("SEGURO" in texto)
 
         if eh_combo:
                 taxa = (
-                    extrair_taxa_refin(texto)          
+                    extrair_taxa_refin(texto)
                     or extrair_taxa_fim(texto)
                     or format_taxa_br(entrada.get("taxa_raw"))
                 )
@@ -418,7 +427,7 @@ class ServicoPadronizacao:
         if "AMAZONPREV" in texto or "AMAZONPREV" in conv:
             cidade = "MANAUS"
             uf = "AM"
-            produto = self._montar_produto(f"PREF. {cidade}", "AMAZONPREV", taxa, beneficio)
+            produto = self._montar_produto(f"PREF. {cidade}", "AMAZONPREV", taxa, beneficio, seguro)
             return {
                 "produto_padronizado": produto,
                 "convenio_padronizado": f"PREF. {cidade} {uf}",
@@ -449,7 +458,8 @@ class ServicoPadronizacao:
                     f"PREF. {cidade}",
                     ascii_upper(subproduto),
                     taxa,
-                    beneficio
+                    beneficio,
+                    seguro
                 )
             else:
                 # SEM SIGLA → INST PREV <CIDADE>
@@ -457,7 +467,8 @@ class ServicoPadronizacao:
                     f"INST PREV {cidade}",
                     "",
                     taxa,
-                    beneficio
+                    beneficio,
+                    seguro
                 )
 
             convenio_pad = (
@@ -491,7 +502,8 @@ class ServicoPadronizacao:
                 f"INST PREV {cidade}",
                 "",
                 taxa,
-                beneficio
+                beneficio,
+                seguro
             )
 
             convenio_pad = (
@@ -507,15 +519,12 @@ class ServicoPadronizacao:
                 "grupo_convenio": "PREFEITURAS",
             }
 
-        # ==================================================
-        # 0) CASO: "CARTAO BENEFICIO - CARTAO GOIAS - 4.50%"
-        # ==================================================
         if "CARTAO BENEFICIO" in texto or ("CARTAO" in texto and "BENEFICIO" in texto):
             uf = _extrair_uf_por_estado_no_texto(texto) or _extrair_uf_por_estado_no_texto(conv)
             if not uf and "GOIAS" in texto:
                 uf = "GO"
             if uf:
-                produto = self._montar_produto(f"GOV. {uf}", "", taxa, True)
+                produto = self._montar_produto(f"GOV. {uf}", "", taxa, True, seguro)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": f"GOV-{uf}",
@@ -527,7 +536,7 @@ class ServicoPadronizacao:
         # 1) HSPM (especial)
         # ==================================================
         if "HSPM" in texto:
-            produto = self._montar_produto("PREF. SAO PAULO", "HSPM", taxa, beneficio)
+            produto = self._montar_produto("PREF. SAO PAULO", "HSPM", taxa, beneficio, seguro)
             return {
                 "produto_padronizado": produto,
                 "convenio_padronizado": "PREF. SAO PAULO SP",
@@ -540,7 +549,7 @@ class ServicoPadronizacao:
         # ==================================================
         if "SIAPE" in texto or "SIAPE" in conv:
             return {
-                "produto_padronizado": self._montar_produto("SIAPE", "", taxa, beneficio),
+                "produto_padronizado": self._montar_produto("SIAPE", "", taxa, beneficio, seguro),
                 "convenio_padronizado": "FEDERAL SIAPE",
                 "familia_produto": "FEDERAIS",
                 "grupo_convenio": "FEDERAL",
@@ -551,7 +560,7 @@ class ServicoPadronizacao:
         # ==================================================
         if "USP" in texto:
             return {
-                "produto_padronizado": self._montar_produto("USP", "", taxa, beneficio),
+                "produto_padronizado": self._montar_produto("USP", "", taxa, beneficio, seguro),
                 "convenio_padronizado": "GOV-SP",
                 "familia_produto": "GOVERNOS",
                 "grupo_convenio": "ESTADUAL",
@@ -559,7 +568,7 @@ class ServicoPadronizacao:
 
         if "UNICAMP" in texto:
             return {
-                "produto_padronizado": self._montar_produto("UNICAMP", "", taxa, beneficio),
+                "produto_padronizado": self._montar_produto("UNICAMP", "", taxa, beneficio, seguro),
                 "convenio_padronizado": "GOV-SP",
                 "familia_produto": "GOVERNOS",
                 "grupo_convenio": "ESTADUAL",
@@ -576,7 +585,7 @@ class ServicoPadronizacao:
                 if estado:
                     uf = ESTADO_PARA_UF.get(estado, "")
             if uf:
-                produto = self._montar_produto(f"TJ - {uf}", "", taxa, beneficio)
+                produto = self._montar_produto(f"TJ - {uf}", "", taxa, beneficio, seguro)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": f"TJ | {uf}",
@@ -618,7 +627,8 @@ class ServicoPadronizacao:
                     f"GOV. {uf}",
                     derivado,
                     taxa,       # ← taxa já correta
-                    beneficio
+                    beneficio,
+                    seguro
                 )
 
                 return {
@@ -645,7 +655,7 @@ class ServicoPadronizacao:
                     derivado = ""
 
                 convenio = self.indice.alias_convenio.get(f"GOV {uf}", f"GOV-{uf}")
-                produto = self._montar_produto(f"GOV. {uf}", derivado, taxa, beneficio)
+                produto = self._montar_produto(f"GOV. {uf}", derivado, taxa, beneficio, seguro)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": convenio,
@@ -668,7 +678,7 @@ class ServicoPadronizacao:
                     uf = _extrair_uf_solto(texto) or _extrair_uf_solto(conv) or "SP"
 
                 convenio = f"PREF. {cidade} {uf}"
-                produto = self._montar_produto(f"PREF. {cidade}", "", taxa, beneficio)
+                produto = self._montar_produto(f"PREF. {cidade}", "", taxa, beneficio, seguro)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": convenio,
@@ -687,7 +697,7 @@ class ServicoPadronizacao:
             if self.indice.eh_prefeitura(cidade_pura):
                 uf = self.indice.uf_prefeitura(cidade_pura) or "SP"
                 convenio = f"PREF. {cidade_pura} {uf}"
-                produto = self._montar_produto(f"PREF. {cidade_pura}", "", taxa, beneficio)
+                produto = self._montar_produto(f"PREF. {cidade_pura}", "", taxa, beneficio, seguro)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": convenio,
@@ -708,7 +718,7 @@ class ServicoPadronizacao:
             if self.indice.eh_prefeitura(cidade):
                 uf = self.indice.uf_prefeitura(cidade) or "SP"
                 convenio = f"PREF. {cidade} {uf}"
-                produto = self._montar_produto(f"PREF. {cidade}", sigla, taxa, beneficio)
+                produto = self._montar_produto(f"PREF. {cidade}", sigla, taxa, beneficio, seguro)
                 return {
                     "produto_padronizado": produto,
                     "convenio_padronizado": convenio,
