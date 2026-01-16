@@ -26,6 +26,7 @@ from .utils_padronizacao import (
     tem_seguro
 )
 from .indice_cache import IndiceCache
+from .catalogos_inst_prev import cidade_por_inst_prev, uf_por_cidade_fallback
 
 
 # ==========================================================
@@ -309,7 +310,7 @@ class ServicoPadronizacao:
 
             achado = _garantir_familia_grupo(achado)
             achado["__ORIGEM_PADRONIZACAO"] = "CACHE"
-            
+
             if not _convenio_tem_uf(achado.get("convenio_padronizado", "")):
                 achado["__ORIGEM_PADRONIZACAO"] = "MANUAL"
 
@@ -425,12 +426,11 @@ class ServicoPadronizacao:
         # Saída: "PREF. MANAUS - AMAZONPREV - 2,50%" | convênio "PREF. MANAUS AM"
         # ==================================================
         if "AMAZONPREV" in texto or "AMAZONPREV" in conv:
-            cidade = "MANAUS"
             uf = "AM"
-            produto = self._montar_produto(f"PREF. {cidade}", "AMAZONPREV", taxa, beneficio, seguro)
+            produto = self._montar_produto(f"GOV. {uf}", "AMAZONPREV", taxa, beneficio, seguro)
             return {
                 "produto_padronizado": produto,
-                "convenio_padronizado": f"PREF. {cidade} {uf}",
+                "convenio_padronizado": f"GOV-{uf}",
                 "familia_produto": "PREFEITURAS",
                 "grupo_convenio": "PREFEITURAS",
             }
@@ -672,10 +672,15 @@ class ServicoPadronizacao:
                 if cidade in {"SP", "SAO PAULO", "SAO-PAULO"}:
                     cidade = "SAO PAULO"
 
-                uf = self.indice.uf_prefeitura(cidade)
+                uf = (
+                    self.indice.uf_prefeitura(cidade)
+                    or uf_por_cidade_fallback(cidade)
+                    or _extrair_uf_solto(texto)
+                    or _extrair_uf_solto(conv)
+                )
 
                 if not uf:
-                    uf = _extrair_uf_solto(texto) or _extrair_uf_solto(conv) or "SP"
+                    return None
 
                 convenio = f"PREF. {cidade} {uf}"
                 produto = self._montar_produto(f"PREF. {cidade}", "", taxa, beneficio, seguro)
@@ -695,7 +700,9 @@ class ServicoPadronizacao:
                 cidade_pura = "SAO PAULO"
 
             if self.indice.eh_prefeitura(cidade_pura):
-                uf = self.indice.uf_prefeitura(cidade_pura) or "SP"
+                uf = self.indice.uf_prefeitura(cidade_pura) or uf_por_cidade_fallback(cidade_pura)
+                if not uf:
+                    return None
                 convenio = f"PREF. {cidade_pura} {uf}"
                 produto = self._montar_produto(f"PREF. {cidade_pura}", "", taxa, beneficio, seguro)
                 return {
@@ -716,7 +723,9 @@ class ServicoPadronizacao:
                 cidade = "SAO PAULO"
 
             if self.indice.eh_prefeitura(cidade):
-                uf = self.indice.uf_prefeitura(cidade) or "SP"
+                uf = self.indice.uf_prefeitura(cidade) or uf_por_cidade_fallback(cidade)
+                if not uf:
+                    return None
                 convenio = f"PREF. {cidade} {uf}"
                 produto = self._montar_produto(f"PREF. {cidade}", sigla, taxa, beneficio, seguro)
                 return {
@@ -727,7 +736,7 @@ class ServicoPadronizacao:
                 }
         return None
 
-        
+
 
     # ======================================================
     # CHAVE DO CACHE
