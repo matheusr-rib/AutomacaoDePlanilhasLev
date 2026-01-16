@@ -146,6 +146,22 @@ GOV-SP
 Família / Grupo:
 GOVERNOS / ESTADUAL
 
+7) INSTITUTOS PREVIDENCIÁRIOS(INST PREV) - SEM NOME DO INSTITUTO ESPECIFICADO
+Produto:
+INST PREV <CIDADE> - <TAXA>%
+Convênio:
+PREF. <CIDADE> <UF>
+Família / Grupo:
+PREFEITURAS / PREFEITURAS
+
+8) INSTITUTOS PREVIDENCIÁRIOS(INST PREV) - COM NOME DO INSTITUTO ESPECIFICADO
+Produto:
+PREF. <CIDADE> - <NOME DO INST PREV> - <TAXA>%
+Convênio:
+PREF. <CIDADE> <UF>
+Família / Grupo:
+PREFEITURAS / PREFEITURAS
+
 ==================================================
 EXEMPLOS OFICIAIS
 ==================================================
@@ -213,6 +229,26 @@ Saída:
   "grupo_convenio": "PREFEITURAS"
 }
 
+Entrada:
+EMPRÉSTIMO - INST PREV ITANHAEM - 2.29%
+
+Saída:
+{
+    "produto_padronizado": "INST PREV ITANHAEM - 2,29%",
+    "convenio_padronizado": "PREF. ITANHAEM SP",
+    "familia_produto": "PREFEITURAS",
+    "grupo_convenio": "PREFEITURAS"
+}
+
+Entrada:
+EMPRÉSTIMO - PREF. FORMIGA - PREVIFOR - 2.04%
+Saída:
+{
+    "produto_padronizado": "PREF. FORMIGA - PREVIFOR - 2,04%",
+    "convenio_padronizado": "PREF. FORMIGA MG",
+    "familia_produto": "PREFEITURAS",
+    "grupo_convenio": "PREFEITURAS"
+}
 ==================================================
 REGRA FINAL DE SEGURANÇA
 ==================================================

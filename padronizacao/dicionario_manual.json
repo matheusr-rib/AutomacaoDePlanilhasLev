@@ -13534,5 +13534,71 @@
     "convenio_padronizado": "GOV-SP",
     "familia_produto": "GOVERNOS",
     "grupo_convenio": "ESTADUAL"
+  },
+  "2984|4.72|99": {
+    "produto_padronizado": "GOV. AM - 4,72%",
+    "convenio_padronizado": "GOV-AM",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "2986|4.50|96": {
+    "produto_padronizado": "GOV. PB - 4,50%",
+    "convenio_padronizado": "GOV-PB",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "2990|4.50|48": {
+    "produto_padronizado": "GOV. PE - 4,50%",
+    "convenio_padronizado": "GOV-PE",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "2988|3.99|96": {
+    "produto_padronizado": "GOV. PR - BENEFICIO - 3,99%",
+    "convenio_padronizado": "GOV-PR",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "2992|3.90|96": {
+    "produto_padronizado": "GOV. RO - 3,90%",
+    "convenio_padronizado": "GOV-RO",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "2996|4.60|96": {
+    "produto_padronizado": "GOV. SP - 4.60%",
+    "convenio_padronizado": "GOV-SP",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "2994|4.50|96": {
+    "produto_padronizado": "GOV. SP - BENEFICIO - 4,50%",
+    "convenio_padronizado": "GOV-SP",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "3006|5.80|120": {
+    "produto_padronizado": "PREF. GUARAPUAVA - 5.80%",
+    "convenio_padronizado": "PREF.GUARAPUAVA",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "3010|5.50|96": {
+    "produto_padronizado": "PREF. ITAPEVA - 5.50%",
+    "convenio_padronizado": "PREF.ITAPEVA",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "3000|4.92|99": {
+    "produto_padronizado": "PREF. JUNDIAI - 4.92%",
+    "convenio_padronizado": "PREF.JUNDIAI",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
+  },
+  "3008|5.50|99": {
+    "produto_padronizado": "PREF. SANTA BARBARA - 5.50%",
+    "convenio_padronizado": "PREF.SANTA BARABARA DOESTE",
+    "familia_produto": "GOVERNOS",
+    "grupo_convenio": "ESTADUAL"
   }
 }

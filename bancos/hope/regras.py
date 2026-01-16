@@ -121,7 +121,7 @@ def linha_fechar(item: CanonicalItem) -> Dict[str, Any]:
 
     base["Término"] = ontem
 
-    
+
     return base
 
 

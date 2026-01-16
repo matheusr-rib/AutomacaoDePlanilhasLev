@@ -11,8 +11,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.staticfiles",
     "api",
-    "corsheaders",  
-      
+    "corsheaders",
 ]
 
 MIDDLEWARE = [
@@ -43,7 +42,7 @@ STATIC_URL = "/static/"
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"
 
-# Config da OpenAI (vamos ler daqui depois)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 
