@@ -119,7 +119,6 @@ def normalizar_token_uf(token: str) -> str:
         return ""
     if t in ESTADO_PARA_UF:
         return ESTADO_PARA_UF[t]
-    # se já é UF
     if re.fullmatch(r"[A-Z]{2}", t):
         return t
     return t

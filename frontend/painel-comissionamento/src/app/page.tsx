@@ -7,6 +7,7 @@ import { HeaderLev } from "@/components/HeaderLev"
 import { UploadCard } from "@/components/UploadCard"
 import { PrimaryButton } from "@/components/PrimaryButton"
 import { MetricsDetails } from "@/components/MetricsDetails"
+import { aguardarExecucao } from "@/lib/pollingExecucao"
 
 export default function Home() {
   const [banco, setBanco] = useState<Banco>("HOPE")
@@ -22,61 +23,77 @@ export default function Home() {
   }, [banco, arquivoInterno, arquivoBanco, loading])
 
   async function executar() {
-    if (!canSubmit) return
+  if (!canSubmit) return
 
-    setLoading(true)
-    setResult(null)
-    setError(null)
+  setLoading(true)
+  setError(null)
+  setResult(null)
 
-    try {
-      const form = new FormData()
-      form.append("banco", banco)
-      form.append("arquivo_interno", arquivoInterno as File)
-      form.append("arquivo_banco", arquivoBanco as File)
+  try {
+    const form = new FormData()
+    form.append("banco", banco)
+    form.append("arquivo_interno", arquivoInterno as File)
+    form.append("arquivo_banco", arquivoBanco as File)
 
-      const { data } = await api.post<ExecucaoResponse>(
-        "/execucoes/atualizacao",
-        form,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      )
+    // 🔹 POST rápido (gera execucao_id)
+    const { data } = await api.post("/execucoes/atualizacao", form)
 
-      if (data.status !== "success") {
-        setError(data.erro || "Não foi possível processar os arquivos.")
-      } else {
-        setResult(data)
-      }
-    } catch {
-      setError(
-        "Não foi possível processar os arquivos. Verifique os dados e tente novamente."
-      )
-    } finally {
-      setLoading(false)
+    const execucaoId = data.execucao_id
+    if (!execucaoId) {
+      throw new Error("Execução não iniciada")
     }
+
+    // 🔁 polling de status
+    const statusFinal = await aguardarExecucao(execucaoId)
+
+    if (statusFinal.status === "ERROR") {
+      throw new Error(statusFinal.erro || "Erro no processamento")
+    }
+
+    // ✅ finalizou
+    setResult({
+      status: "success",
+      execucao_id: execucaoId,
+      download_url: `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api"}/execucoes/${execucaoId}/download`,
+      resumo: statusFinal.resultado,
+      acoes: statusFinal.resultado?.acoes,
+      cache: statusFinal.resultado?.cache,
+      padronizacao: statusFinal.resultado?.padronizacao,
+    })
+  } catch (err: any) {
+    setError(err.message || "Falha na execução")
+  } finally {
+    setLoading(false)
   }
+}
 
   async function baixarPlanilha(url: string) {
-    try {
-      console.log("Download URL:", url)
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error("Falha no download")
-      }
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+    })
 
-      const blob = await response.blob()
-      const objectUrl = window.URL.createObjectURL(blob)
-
-      const a = document.createElement("a")
-      a.href = objectUrl
-      a.download = "planilha_atualizacao.xlsx"
-      document.body.appendChild(a)
-      a.click()
-
-      a.remove()
-      window.URL.revokeObjectURL(objectUrl)
-    } catch {
-      alert("Não foi possível baixar a planilha.")
+    if (!response.ok) {
+      throw new Error(`Falha no download (${response.status})`)
     }
+
+    const blob = await response.blob()
+    const objectUrl = window.URL.createObjectURL(blob)
+
+    const a = document.createElement("a")
+    a.href = objectUrl
+    a.download = "planilha_atualizacao.xlsx"
+    document.body.appendChild(a)
+    a.click()
+
+    a.remove()
+    window.URL.revokeObjectURL(objectUrl)
+  } catch (err) {
+    console.error(err)
+    alert("Não foi possível baixar a planilha.")
   }
+  }
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-zinc-950 to-[#2b1248]">
