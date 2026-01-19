@@ -60,8 +60,8 @@ export default function Home() {
       cache: statusFinal.resultado?.cache,
       padronizacao: statusFinal.resultado?.padronizacao,
     })
-  } catch (err: any) {
-    setError(err.message || "Falha na execução")
+  } catch (err: unknown) {
+    setError((err as Error).message || "Falha na execução")
   } finally {
     setLoading(false)
   }
