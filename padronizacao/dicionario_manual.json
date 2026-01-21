@@ -1,46 +1,4 @@
 {
-  "1691|2.30|120": {
-    "produto_padronizado": "AMAZONPREV - 2,30%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
-  "1692|2.40|96": {
-    "produto_padronizado": "AMAZONPREV - 2,40%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
-  "1692|2.40|120": {
-    "produto_padronizado": "AMAZONPREV - 2,40%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
-  "1693|2.50|72": {
-    "produto_padronizado": "AMAZONPREV - 2,50%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
-  "1693|2.50|84": {
-    "produto_padronizado": "AMAZONPREV - 2,50%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
-  "1693|2.50|96": {
-    "produto_padronizado": "AMAZONPREV - 2,50%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
-  "1693|2.50|120": {
-    "produto_padronizado": "AMAZONPREV - 2,50%",
-    "convenio_padronizado": "GOV-AM",
-    "familia_produto": "GOVERNOS",
-    "grupo_convenio": "ESTADUAL"
-  },
   "2648|1.90|120": {
     "produto_padronizado": "GOV. AC - 1,90%",
     "convenio_padronizado": "GOV-AC",

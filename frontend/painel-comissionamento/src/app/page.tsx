@@ -9,6 +9,26 @@ import { PrimaryButton } from "@/components/PrimaryButton"
 import { MetricsDetails } from "@/components/MetricsDetails"
 import { aguardarExecucao } from "@/lib/pollingExecucao"
 
+// Base da API (deve apontar para o backend na rede)
+// Ex: http://192.168.1.115:8000/api
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") || "http://localhost:8000/api"
+
+function resolveApiUrl(pathOrUrl: string): string {
+  // Se já for absoluta, retorna como está
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl
+
+  // Garante que path começa com "/"
+  const path = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`
+
+  // Se backend devolver "/api/...", mantemos o host do API_BASE e encaixamos o path
+  // Ex: API_BASE = http://192.168.1.115:8000/api
+  // path = /api/execucoes/.../download
+  // final = http://192.168.1.115:8000/api/execucoes/.../download
+  const apiOrigin = API_BASE.replace(/\/api$/i, "") // http://192.168.1.115:8000
+  return `${apiOrigin}${path}`
+}
+
 export default function Home() {
   const [banco, setBanco] = useState<Banco>("HOPE")
   const [arquivoInterno, setArquivoInterno] = useState<File | null>(null)
@@ -23,77 +43,77 @@ export default function Home() {
   }, [banco, arquivoInterno, arquivoBanco, loading])
 
   async function executar() {
-  if (!canSubmit) return
+    if (!canSubmit) return
 
-  setLoading(true)
-  setError(null)
-  setResult(null)
+    setLoading(true)
+    setError(null)
+    setResult(null)
 
-  try {
-    const form = new FormData()
-    form.append("banco", banco)
-    form.append("arquivo_interno", arquivoInterno as File)
-    form.append("arquivo_banco", arquivoBanco as File)
+    try {
+      const form = new FormData()
+      form.append("banco", banco)
+      form.append("arquivo_interno", arquivoInterno as File)
+      form.append("arquivo_banco", arquivoBanco as File)
 
-    // 🔹 POST rápido (gera execucao_id)
-    const { data } = await api.post("/execucoes/atualizacao", form)
+      // POST rápido (gera execucao_id e URLs relativas)
+      const { data } = await api.post("/execucoes/atualizacao", form)
 
-    const execucaoId = data.execucao_id
-    if (!execucaoId) {
-      throw new Error("Execução não iniciada")
+      const execucaoId = data.execucao_id
+      if (!execucaoId) throw new Error("Execução não iniciada")
+
+      // polling de status
+      const statusFinal = await aguardarExecucao(execucaoId)
+
+      if (statusFinal.status === "ERROR") {
+        throw new Error(statusFinal.erro || "Erro no processamento")
+      }
+
+      // download_url agora pode vir relativo do backend (preferir isso)
+      const downloadUrlRelativa: string =
+        data.download_url || `/api/execucoes/${execucaoId}/download`
+
+      setResult({
+        status: "success",
+        execucao_id: execucaoId,
+        download_url: downloadUrlRelativa, // mantém relativo; resolve na hora de baixar
+        resumo: statusFinal.resultado,
+        acoes: statusFinal.resultado?.acoes,
+        cache: statusFinal.resultado?.cache,
+        padronizacao: statusFinal.resultado?.padronizacao,
+      })
+    } catch (err: unknown) {
+      setError((err as Error).message || "Falha na execução")
+    } finally {
+      setLoading(false)
     }
-
-    // 🔁 polling de status
-    const statusFinal = await aguardarExecucao(execucaoId)
-
-    if (statusFinal.status === "ERROR") {
-      throw new Error(statusFinal.erro || "Erro no processamento")
-    }
-
-    // ✅ finalizou
-    setResult({
-      status: "success",
-      execucao_id: execucaoId,
-      download_url: `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api"}/execucoes/${execucaoId}/download`,
-      resumo: statusFinal.resultado,
-      acoes: statusFinal.resultado?.acoes,
-      cache: statusFinal.resultado?.cache,
-      padronizacao: statusFinal.resultado?.padronizacao,
-    })
-  } catch (err: unknown) {
-    setError((err as Error).message || "Falha na execução")
-  } finally {
-    setLoading(false)
-  }
-}
-
-  async function baixarPlanilha(url: string) {
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-    })
-
-    if (!response.ok) {
-      throw new Error(`Falha no download (${response.status})`)
-    }
-
-    const blob = await response.blob()
-    const objectUrl = window.URL.createObjectURL(blob)
-
-    const a = document.createElement("a")
-    a.href = objectUrl
-    a.download = "planilha_atualizacao.xlsx"
-    document.body.appendChild(a)
-    a.click()
-
-    a.remove()
-    window.URL.revokeObjectURL(objectUrl)
-  } catch (err) {
-    console.error(err)
-    alert("Não foi possível baixar a planilha.")
-  }
   }
 
+  async function baixarPlanilha(urlRelativaOuAbsoluta: string) {
+    try {
+      const url = resolveApiUrl(urlRelativaOuAbsoluta)
+
+      const response = await fetch(url, { method: "GET" })
+
+      if (!response.ok) {
+        throw new Error(`Falha no download (${response.status})`)
+      }
+
+      const blob = await response.blob()
+      const objectUrl = window.URL.createObjectURL(blob)
+
+      const a = document.createElement("a")
+      a.href = objectUrl
+      a.download = "planilha_atualizacao.xlsx"
+      document.body.appendChild(a)
+      a.click()
+
+      a.remove()
+      window.URL.revokeObjectURL(objectUrl)
+    } catch (err) {
+      console.error(err)
+      alert("Não foi possível baixar a planilha.")
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-zinc-950 to-[#2b1248]">
@@ -114,7 +134,6 @@ export default function Home() {
               </select>
             </div>
 
-            {/* Upload Interno */}
             <UploadCard
               title="Tabela interna"
               hint="Formato XLSX (obrigatório)"
@@ -123,7 +142,6 @@ export default function Home() {
               onFileChange={setArquivoInterno}
             />
 
-            {/* Upload Banco */}
             <UploadCard
               title="Relatório do banco"
               hint="CSV, XLS ou XLSX (obrigatório)"
@@ -133,7 +151,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Botão executar */}
           <div className="mt-6">
             <PrimaryButton
               label="Executar atualização"
@@ -148,14 +165,12 @@ export default function Home() {
             )}
           </div>
 
-          {/* Erro */}
           {error && (
             <div className="mt-6 rounded-xl border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-200">
               {error}
             </div>
           )}
 
-          {/* Sucesso */}
           {result?.status === "success" && (
             <>
               <MetricsDetails data={result} />

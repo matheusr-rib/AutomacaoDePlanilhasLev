@@ -112,8 +112,8 @@ class ExecucaoAtualizacaoView(View):
             {
                 "status": "success",
                 "execucao_id": exec_id,
-                "status_url": f"http://localhost:8000/api/execucoes/{exec_id}/status",
-                "download_url": f"http://localhost:8000/api/execucoes/{exec_id}/download",
+                "status_url": f"/api/execucoes/{exec_id}/status",
+                "download_url": f"/api/execucoes/{exec_id}/download",
             },
             status=202,
         )
