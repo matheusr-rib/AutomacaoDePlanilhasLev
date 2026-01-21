@@ -12,7 +12,7 @@ import { aguardarExecucao } from "@/lib/pollingExecucao"
 // Base da API (deve apontar para o backend na rede)
 // Ex: http://192.168.1.115:8000/api
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") || "http://localhost:8000/api"
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") || "http://192.168.1.115:8000/api"
 
 function resolveApiUrl(pathOrUrl: string): string {
   // Se já for absoluta, retorna como está
