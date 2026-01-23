@@ -27,7 +27,7 @@ from .utils_padronizacao import (
 )
 from .indice_cache import IndiceCache
 from .catalogos_inst_prev import cidade_por_inst_prev, uf_por_cidade_fallback
-
+_ESTADOS_ORDENADOS = sorted(ESTADO_PARA_UF.keys(), key=len, reverse=True)
 
 # ==========================================================
 # NORMALIZAÇÕES BÁSICAS (CHAVE)
@@ -159,15 +159,24 @@ def _garantir_familia_grupo(padrao: Dict[str, Any]) -> Dict[str, Any]:
     return padrao
 
 
+# no topo do arquivo (mesmo módulo), pra não ordenar toda hora
+_ESTADOS_ORDENADOS = sorted(ESTADO_PARA_UF.keys(), key=len, reverse=True)
+
 def _extrair_uf_por_estado_no_texto(texto_ascii: str) -> Optional[str]:
     """
-    Ajuda em casos tipo "GOIAS" / "MINAS GERAIS" etc.
-    Retorna UF se encontrar o nome do estado.
+    Encontra o nome do estado como token/frase completa dentro do texto.
+    Evita falsos positivos por substring:
+      - "PARA" dentro de "PARANA"
+      - "MATO GROSSO" dentro de "MATO GROSSO DO SUL"
     """
     t = ascii_upper(texto_ascii)
-    for estado, uf in ESTADO_PARA_UF.items():
-        if estado in t:
-            return uf
+    # normaliza separadores comuns (ajuda em "MATO-GROSSO", "PARANA/PR", etc.)
+    t = re.sub(r"[-/\.]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    for estado in _ESTADOS_ORDENADOS:
+        if re.search(rf"\b{re.escape(estado)}\b", t):
+            return ESTADO_PARA_UF[estado]
     return None
 
 
