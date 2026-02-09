@@ -119,4 +119,7 @@ def _mapear_operacao(txt: str) -> str:
     if t in ("CARTÃO C/ SAQUE", "CARTAO C/ SAQUE"):
         return "CARTÃO"
 
+    if t in ("SAQUE COMPLEMENTAR", "SAQUE COMPL"):
+        return "SAQUE COMPL."
+
     return t
