@@ -463,7 +463,7 @@ class ServicoPadronizacao:
             base = f"{base} - {taxa}"
 
         if seguro:
-            base = f"{base} - C/SEGURO"
+            base = f"{base} - C/ SEGURO"
 
         return base
 
