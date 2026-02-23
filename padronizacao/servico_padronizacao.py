@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Set, List
 import re
-from .catalogos_inst_prev import cidade_por_inst_prev, uf_por_cidade_fallback
+
+from .catalogos_inst_prev import uf_por_cidade_fallback
 from .motor_ia import MotorIA
 from .gerenciador_logs import GerenciadorLogs
 from .dicionario_cache import DicionarioCache
@@ -23,10 +24,12 @@ from .utils_padronizacao import (
     extrair_inst_prev_gen,
     extrair_tj_uf,
     extrair_tj_estado,
-    tem_seguro
+    tem_seguro,
+    extrair_faixa_mais,
 )
 from .indice_cache import IndiceCache
-from .catalogos_inst_prev import cidade_por_inst_prev, uf_por_cidade_fallback
+
+# no topo do arquivo (pra não ordenar toda hora)
 _ESTADOS_ORDENADOS = sorted(ESTADO_PARA_UF.keys(), key=len, reverse=True)
 
 # ==========================================================
@@ -101,6 +104,7 @@ _RE_PROIBIDAS = re.compile(
     ) + r")\b"
 )
 
+
 def _convenio_tem_uf(convenio: str) -> bool:
     """
     Retorna True se o convênio contém UF válida no final.
@@ -119,6 +123,7 @@ def _convenio_tem_uf(convenio: str) -> bool:
         re.search(r"\bGOV-[A-Z]{2}$", t) or      # GOV-SP
         re.search(r"\|\s*[A-Z]{2}$", t)          # TJ | SP
     )
+
 
 def _limpar_produto_final(produto: str) -> str:
     """
@@ -159,9 +164,6 @@ def _garantir_familia_grupo(padrao: Dict[str, Any]) -> Dict[str, Any]:
     return padrao
 
 
-# no topo do arquivo (mesmo módulo), pra não ordenar toda hora
-_ESTADOS_ORDENADOS = sorted(ESTADO_PARA_UF.keys(), key=len, reverse=True)
-
 def _extrair_uf_por_estado_no_texto(texto_ascii: str) -> Optional[str]:
     """
     Encontra o nome do estado como token/frase completa dentro do texto.
@@ -199,6 +201,36 @@ def _extrair_uf_solto(texto_ascii: str) -> Optional[str]:
     return None
 
 
+def _injetar_faixa_mais_em_produto(produto: str, faixa: Optional[str]) -> str:
+    """
+    Aplica "N+" após o base (antes do primeiro " - "), mesmo para produtos vindos de CACHE/IA.
+    Ex:
+      "GOV. PB - 2,30%" + "60+" -> "GOV. PB 60+ - 2,30%"
+      "PREF. MANAUS - AMAZONPREV - 2,30%" + "60+" -> "PREF. MANAUS 60+ - AMAZONPREV - 2,30%"
+    """
+    if not produto:
+        return produto
+    if not faixa:
+        return produto
+
+    p_up = ascii_upper(produto)
+    f_up = ascii_upper(faixa)
+    if f_up in p_up:
+        return produto
+
+    if " - " in produto:
+        head, tail = produto.split(" - ", 1)
+        head = head.strip()
+        tail = tail.strip()
+        # evita inserir se já houver um "+" no head por algum motivo
+        if "+" in ascii_upper(head):
+            return produto
+        return f"{head} {faixa} - {tail}"
+    else:
+        # sem separadores, só cola no final
+        return f"{produto.strip()} {faixa}".strip()
+
+
 # ==========================================================
 # SERVIÇO DE PADRONIZAÇÃO
 # ==========================================================
@@ -226,6 +258,7 @@ class ServicoPadronizacao:
 
         self._cache_execucao: Dict[str, Dict[str, Any]] = {}
         self._logadas: Set[str] = set()
+        self._faixa_mais_ctx: str | None = None
 
         self.metricas = {
             "consultas_cache": 0,
@@ -292,96 +325,134 @@ class ServicoPadronizacao:
     # PADRONIZAÇÃO PRINCIPAL
     # ======================================================
     def padronizar(self, entrada: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
-        chave = self._gerar_chave_manual(entrada)
-        self.metricas["consultas_cache"] += 1
+        # ✅ define contexto de faixa (60+, 80+, 90+...) para este item
+        texto_raw = entrada.get("produto_raw", "") or ""
+        convenio_raw = entrada.get("convenio_raw", "") or ""
+        self._faixa_mais_ctx = extrair_faixa_mais(texto_raw) or extrair_faixa_mais(convenio_raw)
 
-        # =========================
-        # 1) CACHE DE EXECUÇÃO
-        # =========================
-        if chave in self._cache_execucao:
-            self.metricas["hits_cache"] += 1
-            achado = dict(self._cache_execucao[chave])
-            achado.setdefault("__ORIGEM_PADRONIZACAO", "CACHE")
-            return achado, 0.99
+        try:
+            chave = self._gerar_chave_manual(entrada)
+            self.metricas["consultas_cache"] += 1
 
-        # =========================
-        # 2) CACHE PERSISTIDO (JSON)
-        # =========================
-        achado = self.cache.get(chave)
-        if achado is not None:
-            self.metricas["hits_cache"] += 1
-            achado = dict(achado)
+            # =========================
+            # 1) CACHE DE EXECUÇÃO
+            # =========================
+            if chave in self._cache_execucao:
+                self.metricas["hits_cache"] += 1
+                achado = dict(self._cache_execucao[chave])
 
-            if achado.get("produto_padronizado"):
-                achado["produto_padronizado"] = _limpar_produto_final(
-                    achado["produto_padronizado"]
+                # aplica faixa também no retorno do cache de execução
+                if achado.get("produto_padronizado"):
+                    achado["produto_padronizado"] = _injetar_faixa_mais_em_produto(
+                        achado["produto_padronizado"], self._faixa_mais_ctx
+                    )
+                    achado["produto_padronizado"] = _limpar_produto_final(achado["produto_padronizado"])
+
+                achado.setdefault("__ORIGEM_PADRONIZACAO", "CACHE")
+                return achado, 0.99
+
+            # =========================
+            # 2) CACHE PERSISTIDO (JSON)
+            # =========================
+            achado = self.cache.get(chave)
+            if achado is not None:
+                self.metricas["hits_cache"] += 1
+                achado = dict(achado)
+
+                if achado.get("produto_padronizado"):
+                    achado["produto_padronizado"] = _injetar_faixa_mais_em_produto(
+                        achado["produto_padronizado"], self._faixa_mais_ctx
+                    )
+                    achado["produto_padronizado"] = _limpar_produto_final(
+                        achado["produto_padronizado"]
+                    )
+
+                achado = _garantir_familia_grupo(achado)
+                achado["__ORIGEM_PADRONIZACAO"] = "CACHE"
+
+                if not _convenio_tem_uf(achado.get("convenio_padronizado", "")):
+                    achado["__ORIGEM_PADRONIZACAO"] = "MANUAL"
+
+                self._cache_execucao[chave] = achado
+                return achado, 1.0
+
+            # =========================
+            # 3) REGRAS DETERMINÍSTICAS
+            # =========================
+            padrao = self._padronizar_por_regra(entrada)
+            if padrao is not None:
+                padrao = dict(padrao)
+
+                if padrao.get("produto_padronizado"):
+                    # (normalmente já vem do _montar_produto com a faixa),
+                    # mas aplicamos também aqui como rede de segurança.
+                    padrao["produto_padronizado"] = _injetar_faixa_mais_em_produto(
+                        padrao["produto_padronizado"], self._faixa_mais_ctx
+                    )
+                    padrao["produto_padronizado"] = _limpar_produto_final(
+                        padrao["produto_padronizado"]
+                    )
+
+                padrao = _garantir_familia_grupo(padrao)
+                padrao["__ORIGEM_PADRONIZACAO"] = "REGRA"
+
+                if not _convenio_tem_uf(padrao.get("convenio_padronizado", "")):
+                    padrao["__ORIGEM_PADRONIZACAO"] = "MANUAL"
+
+                self._cache_execucao[chave] = padrao
+                return padrao, 0.98
+
+            # =========================
+            # 4) IA (FALLBACK FINAL)
+            # =========================
+            self.metricas["chamadas_ia"] += 1
+            sugestao, confianca = self.ia.sugerir_padrao(entrada)
+
+            sugestao = dict(sugestao)
+
+            if sugestao.get("produto_padronizado"):
+                sugestao["produto_padronizado"] = _injetar_faixa_mais_em_produto(
+                    sugestao["produto_padronizado"], self._faixa_mais_ctx
+                )
+                sugestao["produto_padronizado"] = _limpar_produto_final(
+                    sugestao["produto_padronizado"]
                 )
 
-            achado = _garantir_familia_grupo(achado)
-            achado["__ORIGEM_PADRONIZACAO"] = "CACHE"
+            sugestao = _garantir_familia_grupo(sugestao)
+            sugestao["__ORIGEM_PADRONIZACAO"] = "IA"
 
-            if not _convenio_tem_uf(achado.get("convenio_padronizado", "")):
-                achado["__ORIGEM_PADRONIZACAO"] = "MANUAL"
+            self._cache_execucao[chave] = sugestao
 
-            self._cache_execucao[chave] = achado
-            return achado, 1.0
+            if chave and chave not in self._logadas:
+                self.logger.registrar_sugestao(chave, entrada, sugestao, confianca)
+                self.metricas["linhas_csv"] += 1
+                self._logadas.add(chave)
 
-        # =========================
-        # 3) REGRAS DETERMINÍSTICAS
-        # =========================
-        padrao = self._padronizar_por_regra(entrada)
-        if padrao is not None:
-            padrao = dict(padrao)
+            return sugestao, confianca
 
-            if padrao.get("produto_padronizado"):
-                padrao["produto_padronizado"] = _limpar_produto_final(
-                    padrao["produto_padronizado"]
-                )
-
-            padrao = _garantir_familia_grupo(padrao)
-            padrao["__ORIGEM_PADRONIZACAO"] = "REGRA"
-
-            if not _convenio_tem_uf(padrao.get("convenio_padronizado", "")):
-                padrao["__ORIGEM_PADRONIZACAO"] = "MANUAL"
-
-            self._cache_execucao[chave] = padrao
-            return padrao, 0.98
-
-        # =========================
-        # 4) IA (FALLBACK FINAL)
-        # =========================
-        self.metricas["chamadas_ia"] += 1
-        sugestao, confianca = self.ia.sugerir_padrao(entrada)
-
-        sugestao = dict(sugestao)
-        if sugestao.get("produto_padronizado"):
-            sugestao["produto_padronizado"] = _limpar_produto_final(
-                sugestao["produto_padronizado"]
-            )
-
-        sugestao = _garantir_familia_grupo(sugestao)
-        sugestao["__ORIGEM_PADRONIZACAO"] = "IA"
-
-        self._cache_execucao[chave] = sugestao
-
-        if chave and chave not in self._logadas:
-            self.logger.registrar_sugestao(chave, entrada, sugestao, confianca)
-            self.metricas["linhas_csv"] += 1
-            self._logadas.add(chave)
-
-        return sugestao, confianca
+        finally:
+            # ✅ evita "vazar" 60+ de um item para o próximo
+            self._faixa_mais_ctx = None
 
     # ======================================================
     # HELPERS DE MONTAGEM
     # ======================================================
-    def _montar_produto(self, prefixo: str, meio: str, taxa: str, beneficio: bool, seguro: bool) -> str:
-        """
-        prefixo: 'PREF. COTIA' / 'GOV. SP' / 'TJ - MG' / 'INST PREV GUARAPUAVA'
-        meio: 'SEPREM' / 'SEC EDUCACAO' / 'HSPM' / ''
-        beneficio insere: ' - BENEFICIO' antes da taxa
-        seguro insere: ' - C/SEGURO' no final (após a taxa)
-        """
+    def _montar_produto(
+        self,
+        prefixo: str,
+        meio: str,
+        taxa: str,
+        beneficio: bool,
+        seguro: bool,
+    ) -> str:
         base = prefixo.strip()
+
+        # ✅ APLICAÇÃO GLOBAL (regras): cola "60+" após o base, sem " - "
+        faixa = self._faixa_mais_ctx
+        if faixa and ascii_upper(faixa) not in ascii_upper(base):
+            # evita duplicar se o base já tiver algum "+"
+            if "+" not in ascii_upper(base):
+                base = f"{base} {faixa}"
 
         if meio:
             base = f"{base} - {meio.strip()}"
@@ -406,9 +477,7 @@ class ServicoPadronizacao:
         texto = ascii_upper(texto_raw)
         conv = ascii_upper(convenio_raw)
 
-        eh_combo = (
-            "COMBO" in texto
-        )
+        eh_combo = ("COMBO" in texto)
 
         if not texto and not conv:
             return None
@@ -417,17 +486,16 @@ class ServicoPadronizacao:
         seguro = tem_seguro(texto) or ("SEGURO" in texto)
 
         if eh_combo:
-                taxa = (
-                    extrair_taxa_refin(texto)
-                    or extrair_taxa_fim(texto)
-                    or format_taxa_br(entrada.get("taxa_raw"))
-                )
+            taxa = (
+                extrair_taxa_refin(texto)
+                or extrair_taxa_fim(texto)
+                or format_taxa_br(entrada.get("taxa_raw"))
+            )
         else:
-                    taxa = format_taxa_br(
-                        extrair_taxa_fim(texto)
-                        or entrada.get("taxa_raw")
-                    )
-
+            taxa = format_taxa_br(
+                extrair_taxa_fim(texto)
+                or entrada.get("taxa_raw")
+            )
 
         # ==================================================
         # AMAZONPREV — regra direta (prefeitura de Manaus)
@@ -443,7 +511,6 @@ class ServicoPadronizacao:
                 "familia_produto": "PREFEITURAS",
                 "grupo_convenio": "PREFEITURAS",
             }
-
 
         # ==================================================
         # INST PREV (REGRA NOVA – ÚNICA)
@@ -468,7 +535,7 @@ class ServicoPadronizacao:
                     ascii_upper(subproduto),
                     taxa,
                     beneficio,
-                    seguro
+                    seguro,
                 )
             else:
                 # SEM SIGLA → INST PREV <CIDADE>
@@ -477,7 +544,7 @@ class ServicoPadronizacao:
                     "",
                     taxa,
                     beneficio,
-                    seguro
+                    seguro,
                 )
 
             convenio_pad = (
@@ -512,7 +579,7 @@ class ServicoPadronizacao:
                 "",
                 taxa,
                 beneficio,
-                seguro
+                seguro,
             )
 
             convenio_pad = (
@@ -606,8 +673,7 @@ class ServicoPadronizacao:
         # 5) COMBO/PORT com GOV (NUNCA deixar PORT aparecer no produto)
         # ==================================================
         if eh_combo:
-
-    # tenta extrair UF de qualquer forma válida
+            # tenta extrair UF de qualquer forma válida
             uf = (
                 extrair_gov_uf(texto)
                 or extrair_gov_uf(conv)
@@ -615,8 +681,6 @@ class ServicoPadronizacao:
                 or _extrair_uf_por_estado_no_texto(conv)
             )
 
-            # se ainda não tiver UF, deixa a regra seguir para PREF / INST PREV
-            # (não retorna None aqui)
             derivado = ""
 
             if uf:
@@ -635,9 +699,9 @@ class ServicoPadronizacao:
                 produto = self._montar_produto(
                     f"GOV. {uf}",
                     derivado,
-                    taxa,       # ← taxa já correta
+                    taxa,
                     beneficio,
-                    seguro
+                    seguro,
                 )
 
                 return {
@@ -646,7 +710,6 @@ class ServicoPadronizacao:
                     "familia_produto": "GOVERNOS",
                     "grupo_convenio": "ESTADUAL",
                 }
-
 
         # ==================================================
         # 6) GOV simples (sem combo/port)
@@ -743,9 +806,8 @@ class ServicoPadronizacao:
                     "familia_produto": "PREFEITURAS",
                     "grupo_convenio": "PREFEITURAS",
                 }
+
         return None
-
-
 
     # ======================================================
     # CHAVE DO CACHE

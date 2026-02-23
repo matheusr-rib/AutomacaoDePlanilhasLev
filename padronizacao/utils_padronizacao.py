@@ -61,6 +61,9 @@ def extrair_taxa_refin(texto: str) -> str:
     return format_taxa_br(m.group(1)) if m else ""
 
 
+# para pegar 60+
+_RE_FAIXA_MAIS = re.compile(r"\b(\d{1,3})\s*\+")
+
 # =====================================================
 # FLAGS
 # =====================================================
@@ -71,6 +74,13 @@ def tem_beneficio(texto: str) -> bool:
 def tem_seguro(texto: str) -> bool:
     return "SEGURO" in ascii_upper(texto)
 
+
+def extrair_faixa_mais(texto: str) -> Optional[str]:
+    t = ascii_upper(texto or "")
+    m = _RE_FAIXA_MAIS.search(t)
+    if not m:
+        return None
+    return f"{m.group(1)}+"
 
 # =====================================================
 # ESTADO -> UF (TRIBUNAIS / AJUDAS)

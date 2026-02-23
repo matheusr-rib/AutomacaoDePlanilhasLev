@@ -17,7 +17,7 @@ from api.controllers.background import executar_em_background
 
 def _write_status(status_path: Path, status: str, erro: str | None = None, resultado: dict | None = None) -> None:
     payload = {
-        "status": status,  # PROCESSING | DONE | ERROR
+        "status": status,
         "erro": erro,
     }
     if resultado is not None:
